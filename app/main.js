@@ -61,57 +61,74 @@ async function populateSelect(indexData) {
     const chosen = sel.value;
     const match = (indexData.exercises || []).find((e) => e.path === chosen);
     if (match?.id) window.location.hash = match.id;
-    // reload whole page state simply for MVP
     window.location.reload();
   };
 
   return sel.value;
 }
 
+function showError(err) {
+  const msg = err?.stack ? String(err.stack) : String(err);
+  $("stderr").textContent = msg;
+  $("result").textContent = JSON.stringify({ error: msg }, null, 2);
+}
+
 async function boot() {
-  const indexData = await fetchJson("./exercises/index.json");
-  const exercisePath = await populateSelect(indexData);
+  try {
+    const indexData = await fetchJson("./exercises/index.json");
+    const exercisePath = await populateSelect(indexData);
 
-  await ensurePyodide();
+    await ensurePyodide();
 
-  const loaded = await loadExercise(exercisePath);
-  const exercise = loaded.exercise;
+    const loaded = await loadExercise(exercisePath);
+    const exercise = loaded.exercise;
 
-  $("exercise-title").textContent = exercise.title;
-  $("exercise-prompt").textContent = loaded.promptText || "";
+    $("exercise-title").textContent = exercise.title;
+    $("exercise-prompt").textContent = loaded.promptText || "";
 
-  const entry = loaded.files.entrypoint;
-  $("code").value = loaded.files.starter?.[entry] ?? "";
+    const entry = loaded.files.entrypoint;
+    $("code").value = loaded.files.starter?.[entry] ?? "";
 
-  $("run").onclick = async () => {
-    $("stdout").textContent = "";
-    $("stderr").textContent = "";
-    $("result").textContent = "Running...";
+    $("run").onclick = async () => {
+      $("stdout").textContent = "";
+      $("stderr").textContent = "";
+      $("result").textContent = "Running...";
 
-    const files = buildRunFiles(loaded, $("code").value);
+      try {
+        const files = buildRunFiles(loaded, $("code").value);
 
-    const res = await runPython({
-      files,
-      entrypoint: entry,
-      stdin: exercise.runner?.stdin ?? ""
-    });
+        const res = await runPython({
+          files,
+          entrypoint: entry,
+          stdin: exercise.runner?.stdin ?? ""
+        });
 
-    $("stdout").textContent = res.stdout || "";
-    $("stderr").textContent = res.stderr || "";
-    $("result").textContent = JSON.stringify(res.status, null, 2);
-  };
+        $("stdout").textContent = res.stdout || "";
+        $("stderr").textContent = res.stderr || "";
+        $("result").textContent = JSON.stringify(res.status, null, 2);
+      } catch (err) {
+        showError(err);
+      }
+    };
 
-  $("grade").onclick = async () => {
-    $("stdout").textContent = "";
-    $("stderr").textContent = "";
-    $("result").textContent = "Grading...";
+    $("grade").onclick = async () => {
+      $("stdout").textContent = "";
+      $("stderr").textContent = "";
+      $("result").textContent = "Grading...";
 
-    const grade = await gradeAttempt(exercise, $("code").value, loaded.baseUrl);
+      try {
+        const grade = await gradeAttempt(exercise, $("code").value, loaded.baseUrl);
 
-    $("stdout").textContent = stripMarkedBlock(grade.runner?.stdout || "");
-    $("stderr").textContent = grade.runner?.stderr || "";
-    $("result").textContent = JSON.stringify(grade, null, 2);
-  };
+        $("stdout").textContent = stripMarkedBlock(grade.runner?.stdout || "");
+        $("stderr").textContent = grade.runner?.stderr || "";
+        $("result").textContent = JSON.stringify(grade, null, 2);
+      } catch (err) {
+        showError(err);
+      }
+    };
+  } catch (err) {
+    showError(err);
+  }
 }
 
 boot();
