@@ -67,19 +67,29 @@ async function populateSelect(indexData) {
   return sel.value;
 }
 
+function setBoot(msg) {
+  const el = $("boot-status");
+  if (el) el.textContent = `Boot status: ${msg}`;
+}
+
 function showError(err) {
   const msg = err?.stack ? String(err.stack) : String(err);
+  setBoot("ERROR (see stderr)");
   $("stderr").textContent = msg;
   $("result").textContent = JSON.stringify({ error: msg }, null, 2);
 }
 
 async function boot() {
   try {
+    setBoot("main.js loaded");
+
+    setBoot("fetching exercises/index.json ...");
     const indexData = await fetchJson("./exercises/index.json");
+
+    setBoot("populating selector ...");
     const exercisePath = await populateSelect(indexData);
 
-    await ensurePyodide();
-
+    setBoot(`loading exercise: ${exercisePath} ...`);
     const loaded = await loadExercise(exercisePath);
     const exercise = loaded.exercise;
 
@@ -88,6 +98,11 @@ async function boot() {
 
     const entry = loaded.files.entrypoint;
     $("code").value = loaded.files.starter?.[entry] ?? "";
+
+    setBoot("loading pyodide ...");
+    await ensurePyodide();
+
+    setBoot("ready (handlers attached)");
 
     $("run").onclick = async () => {
       $("stdout").textContent = "";
