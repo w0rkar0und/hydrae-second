@@ -4,6 +4,20 @@ import { gradeAttempt } from "./grader.js";
 
 const $ = (id) => document.getElementById(id);
 
+function buildRunFiles(loaded, editorText) {
+  const entry = loaded.files.entrypoint;
+
+  // Merge starter + readonly + assets, then overwrite entrypoint with editor content
+  const files = {
+    ...(loaded.files.starter || {}),
+    ...(loaded.files.readonly || {}),
+    ...(loaded.files.assets || {})
+  };
+
+  files[entry] = editorText;
+  return files;
+}
+
 async function boot() {
   const loaded = await loadExercise("./exercises/py.basics.001/exercise.json");
   const exercise = loaded.exercise;
@@ -21,8 +35,11 @@ async function boot() {
     $("stderr").textContent = "";
     $("result").textContent = "Running...";
 
+    const files = buildRunFiles(loaded, $("code").value);
+
     const res = await runPython({
-      code: $("code").value,
+      files,
+      entrypoint: entry,
       stdin: exercise.runner?.stdin ?? ""
     });
 
@@ -36,6 +53,7 @@ async function boot() {
     $("stderr").textContent = "";
     $("result").textContent = "Grading...";
 
+    // For harness grading we only need studentCode; grader constructs its own VFS files.
     const grade = await gradeAttempt(exercise, $("code").value);
 
     $("stdout").textContent = grade.runner?.stdout || "";

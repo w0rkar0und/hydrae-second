@@ -13,16 +13,30 @@ export async function gradeAttempt(exercise, studentCode) {
     };
   }
 
+  const entrypoint = exercise.files?.entrypoint || "main.py";
   const harness = grading.harness?.inline ?? "";
   const needle = grading.pass_condition?.stdout_includes ?? "__PASS__";
 
-  const code = `
-${studentCode}
-
+  // Build a deterministic grading entrypoint that:
+  // 1) executes student entrypoint
+  // 2) executes harness
+  const gradeEntrypoint = "__grade__.py";
+  const gradeScript = `
+import runpy
+runpy.run_path(${JSON.stringify("/hydrae/" + entrypoint)}, run_name="__main__")
 ${harness}
 `;
 
-  const runner = await runPython({ code });
+  const files = {
+    [entrypoint]: studentCode,
+    [gradeEntrypoint]: gradeScript
+  };
+
+  const runner = await runPython({
+    files,
+    entrypoint: gradeEntrypoint,
+    stdin: exercise.runner?.stdin ?? ""
+  });
 
   const passed = runner.status?.ok === true && (runner.stdout || "").includes(needle);
 
