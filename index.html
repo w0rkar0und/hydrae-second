@@ -1,7 +1,35 @@
 <!doctype html>
-<html>
-  <head><meta charset="utf-8"><title>Second</title></head>
-  <body><h1>second.hydrae.mx</h1></body>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Hydrae Tutor (MVP)</title>
+  </head>
+  <body>
+    <h1>Hydrae Tutor (MVP)</h1>
+
+    <section>
+      <h2>Exercise</h2>
+      <div id="exercise-title"></div>
+      <pre id="exercise-prompt"></pre>
+    </section>
+
+    <section>
+      <h2>Code</h2>
+      <textarea id="code" rows="14" cols="90" spellcheck="false"></textarea>
+      <div>
+        <button id="run">Run</button>
+        <button id="grade">Grade</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Output</h2>
+      <pre id="stdout"></pre>
+      <pre id="stderr"></pre>
+      <pre id="result"></pre>
+    </section>
+
+    <script type="module" src="./app/main.js"></script>
+  </body>
 </html>
-<!-- second deploy test -->
-<!-- deploy key test -->

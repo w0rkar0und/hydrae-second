@@ -1,0 +1,20 @@
+{
+  "id": "py.basics.001",
+  "version": 1,
+  "title": "Hello, stdout",
+  "prompt": {
+    "format": "markdown",
+    "path": "./prompt.md"
+  },
+  "files": {
+    "student_entry": "main.py",
+    "starter": {
+      "main.py": "print('Hello from Hydrae Tutor')"
+    }
+  },
+  "grading": {
+    "type": "harness_v0",
+    "points": 1,
+    "harness": "print('__PASS__')"
+  }
+}
