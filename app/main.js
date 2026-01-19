@@ -5,11 +5,14 @@ import { gradeAttempt } from "./grader.js";
 const $ = (id) => document.getElementById(id);
 
 async function boot() {
-  const exercise = await loadExercise("./exercises/py.basics.001/exercise.json");
+  const loaded = await loadExercise("./exercises/py.basics.001/exercise.json");
+  const exercise = loaded.exercise;
 
   $("exercise-title").textContent = exercise.title;
-  $("exercise-prompt").textContent = exercise.prompt?.text ?? "";
-  $("code").value = exercise.files?.starter?.["main.py"] ?? "";
+  $("exercise-prompt").textContent = loaded.promptText || "";
+
+  const entry = loaded.files.entrypoint;
+  $("code").value = loaded.files.starter?.[entry] ?? "";
 
   await ensurePyodide();
 
@@ -20,7 +23,7 @@ async function boot() {
 
     const res = await runPython({
       code: $("code").value,
-      stdin: ""
+      stdin: exercise.runner?.stdin ?? ""
     });
 
     $("stdout").textContent = res.stdout || "";

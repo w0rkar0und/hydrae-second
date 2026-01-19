@@ -1,20 +1,59 @@
 {
+  "schema_version": "1.0",
   "id": "py.basics.001",
   "version": 1,
   "title": "Hello, stdout",
+  "tags": ["basics"],
+  "difficulty": 1,
+
   "prompt": {
     "format": "markdown",
-    "path": "./prompt.md"
+    "path": "./prompt.md",
+    "inline": null
   },
+
   "files": {
-    "student_entry": "main.py",
+    "entrypoint": "main.py",
     "starter": {
-      "main.py": "print('Hello from Hydrae Tutor')"
-    }
+      "main.py": { "inline": "print('Hello from Hydrae Tutor')" }
+    },
+    "readonly": {},
+    "assets": {}
   },
+
+  "runner": {
+    "mode": "run",
+    "engine": "pyodide",
+    "python": "3.12",
+    "stdin": "",
+    "argv": [],
+    "env": {},
+    "limits": { "time_ms": 1500, "memory_mb": 128 },
+    "trace": { "enabled": false, "kind": "none" }
+  },
+
   "grading": {
-    "type": "harness_v0",
+    "type": "harness_v1",
     "points": 1,
-    "harness": "print('__PASS__')"
+    "pass_condition": { "stdout_includes": "__PASS__" },
+    "harness": { "inline": "print('__PASS__')" }
+  },
+
+  "hints": {
+    "enabled": true,
+    "max_hints": 3,
+    "levels": ["nudge", "concept", "near_solution"],
+    "rules": { "no_full_solution": true, "max_code_lines": 6, "prefer_questions": true }
+  },
+
+  "ui": {
+    "editor": { "mode": "single_file", "focus_file": "main.py" },
+    "panels": { "prompt": true, "console": true, "tests": "never" }
+  },
+
+  "metadata": {
+    "author": "hydrae",
+    "created_utc": "2026-01-19T00:00:00Z",
+    "updated_utc": "2026-01-19T00:00:00Z"
   }
 }

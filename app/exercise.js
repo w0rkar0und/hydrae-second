@@ -1,16 +1,58 @@
-export async function loadExercise(path) {
-  const res = await fetch(path, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to load exercise: ${path} (${res.status})`);
-  const exercise = await res.json();
+async function fetchText(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Failed to fetch: ${url} (${res.status})`);
+  return await res.text();
+}
 
-  // Load prompt text if prompt.path exists
-  if (exercise.prompt?.path) {
-    const p = await fetch(new URL(exercise.prompt.path, window.location.href), { cache: "no-store" });
-    if (p.ok) exercise.prompt.text = await p.text();
+async function materializeFileMap(fileMap, baseUrl) {
+  const out = {};
+  if (!fileMap) return out;
+
+  for (const [vfsPath, src] of Object.entries(fileMap)) {
+    if (!src) continue;
+
+    if (typeof src.inline === "string") {
+      out[vfsPath] = src.inline;
+      continue;
+    }
+
+    if (typeof src.path === "string") {
+      const url = new URL(src.path, baseUrl);
+      out[vfsPath] = await fetchText(url);
+      continue;
+    }
+
+    throw new Error(`Invalid file source for ${vfsPath}: expected {inline} or {path}`);
   }
 
-  // Load starter file content if starter points at filenames
-  // For now we expect starter to already contain inline content (phase 0),
-  // but this keeps the door open.
-  return exercise;
+  return out;
+}
+
+export async function loadExercise(exerciseJsonPath) {
+  const baseUrl = new URL(exerciseJsonPath, window.location.href);
+
+  const exercise = JSON.parse(await fetchText(baseUrl));
+
+  // Prompt: inline wins, else path
+  let promptText = "";
+  if (exercise.prompt?.inline) {
+    promptText = exercise.prompt.inline;
+  } else if (exercise.prompt?.path) {
+    promptText = await fetchText(new URL(exercise.prompt.path, baseUrl));
+  }
+
+  const starter = await materializeFileMap(exercise.files?.starter, baseUrl);
+  const readonly = await materializeFileMap(exercise.files?.readonly, baseUrl);
+  const assets = await materializeFileMap(exercise.files?.assets, baseUrl);
+
+  return {
+    exercise,
+    promptText,
+    files: {
+      entrypoint: exercise.files?.entrypoint || "main.py",
+      starter,
+      readonly,
+      assets
+    }
+  };
 }
