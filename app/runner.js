@@ -21,7 +21,6 @@ export async function ensurePyodide() {
     indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.1/full/"
   });
 
-  // Create base workdir once (we’ll clear contents each run)
   try {
     pyodide.FS.mkdir(WORKDIR);
   } catch (_) {
@@ -32,11 +31,11 @@ export async function ensurePyodide() {
 }
 
 /**
- * RunnerRequest shape (Phase C):
+ * RunnerRequest (Phase C/D):
  * {
- *   files: { "path/in/vfs.py": "file contents as string", ... },
- *   entrypoint: "main.py",
- *   stdin?: string,
+ *   files: { "path/in/vfs.py": "file contents", ... },
+ *   entrypoint: "main.py" | "__grade__.py",
+ *   stdin?: string
  * }
  *
  * RunnerResult:
@@ -82,7 +81,10 @@ result = {
 `;
 
     await pyodide.runPythonAsync(wrapped);
-    return pyodide.globals.get("result").toJs({ dict_converter: Object });
+
+    // Convert Python dict to JS, then normalize to a plain object
+    const raw = pyodide.globals.get("result").toJs();
+    return normalizeToPlainObject(raw);
   } catch (e) {
     return {
       status: { ok: false, exception: String(e) },
@@ -95,27 +97,21 @@ result = {
 /* ------------------------- helpers ------------------------- */
 
 function resolveEntrypoint(entrypoint) {
-  // entrypoint is relative to WORKDIR
   const clean = String(entrypoint || "main.py").replace(/^\/+/, "");
   return `${WORKDIR}/${clean}`;
 }
 
 function clearWorkdir() {
-  // Remove everything under WORKDIR (best-effort).
-  // Keeps WORKDIR itself.
   try {
     const items = pyodide.FS.readdir(WORKDIR);
     for (const name of items) {
       if (name === "." || name === "..") continue;
       rmTree(`${WORKDIR}/${name}`);
     }
-  } catch (_) {
-    // ignore
-  }
+  } catch (_) {}
 }
 
 function rmTree(path) {
-  // Recursively delete files/dirs in Pyodide FS
   try {
     const stat = pyodide.FS.stat(path);
     const isDir = pyodide.FS.isDir(stat.mode);
@@ -131,9 +127,7 @@ function rmTree(path) {
       rmTree(`${path}/${k}`);
     }
     pyodide.FS.rmdir(path);
-  } catch (_) {
-    // ignore
-  }
+  } catch (_) {}
 }
 
 function writeFiles(files) {
@@ -144,30 +138,68 @@ function writeFiles(files) {
     const fullPath = `${WORKDIR}/${cleanRel}`;
 
     mkdirTreeForFile(fullPath);
-
-    // Phase C: assume text files (UTF-8)
     pyodide.FS.writeFile(fullPath, String(content), { encoding: "utf8" });
   }
 }
 
 function mkdirTreeForFile(fullPath) {
   const parts = fullPath.split("/").filter(Boolean);
-  // Remove filename
-  parts.pop();
+  parts.pop(); // filename
 
   let cur = "";
   for (const p of parts) {
     cur += "/" + p;
     try {
       pyodide.FS.mkdir(cur);
-    } catch (_) {
-      // exists
-    }
+    } catch (_) {}
   }
 }
 
-// Safely embed a JS string as a Python string literal.
 function pyStringLiteral(s) {
-  // JSON string is a valid Python double-quoted string literal for our use.
   return JSON.stringify(String(s));
+}
+
+/**
+ * Pyodide may return:
+ * - plain objects
+ * - Maps
+ * - Arrays of [key, value] pairs
+ * - nested mixes of the above
+ *
+ * This normalizes into plain JS objects recursively.
+ */
+function normalizeToPlainObject(value) {
+  if (value === null || value === undefined) return value;
+
+  if (Array.isArray(value)) {
+    // If it's an array of [k,v] pairs, treat it as entries
+    if (value.length > 0 && Array.isArray(value[0]) && value[0].length === 2) {
+      const obj = {};
+      for (const [k, v] of value) {
+        obj[String(k)] = normalizeToPlainObject(v);
+      }
+      return obj;
+    }
+    return value.map(normalizeToPlainObject);
+  }
+
+  // Map-like
+  if (value instanceof Map) {
+    const obj = {};
+    for (const [k, v] of value.entries()) {
+      obj[String(k)] = normalizeToPlainObject(v);
+    }
+    return obj;
+  }
+
+  // Plain object
+  if (typeof value === "object") {
+    const obj = {};
+    for (const [k, v] of Object.entries(value)) {
+      obj[k] = normalizeToPlainObject(v);
+    }
+    return obj;
+  }
+
+  return value;
 }
