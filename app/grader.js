@@ -9,6 +9,34 @@ async function fetchText(url) {
   return await res.text();
 }
 
+// Convert arrays-of-[k,v] pairs / Maps / nested mixtures into plain objects
+function normalize(value) {
+  if (value === null || value === undefined) return value;
+
+  if (Array.isArray(value)) {
+    if (value.length > 0 && Array.isArray(value[0]) && value[0].length === 2) {
+      const obj = {};
+      for (const [k, v] of value) obj[String(k)] = normalize(v);
+      return obj;
+    }
+    return value.map(normalize);
+  }
+
+  if (value instanceof Map) {
+    const obj = {};
+    for (const [k, v] of value.entries()) obj[String(k)] = normalize(v);
+    return obj;
+  }
+
+  if (typeof value === "object") {
+    const obj = {};
+    for (const [k, v] of Object.entries(value)) obj[k] = normalize(v);
+    return obj;
+  }
+
+  return value;
+}
+
 function extractGradeJson(stdout) {
   const s = String(stdout || "");
   const a = s.indexOf(JSON_START);
@@ -44,13 +72,14 @@ ${harness}
       [gradeEntrypoint]: gradeScript
     };
 
-    const runner = await runPython({
+    const runnerRaw = await runPython({
       files,
       entrypoint: gradeEntrypoint,
       stdin: exercise.runner?.stdin ?? ""
     });
 
-    const passed = runner.status?.ok === true && (runner.stdout || "").includes(needle);
+    const runner = normalize(runnerRaw);
+    const passed = runner?.status?.ok === true && String(runner?.stdout || "").includes(needle);
 
     return {
       passed,
@@ -81,11 +110,6 @@ ${harness}
     const points = grading.points ?? 1;
     const passThreshold = grading.pass_threshold ?? points;
 
-    // Tiny deterministic test runner (no pytest).
-    // - loads tests file with runpy.run_path to get dict
-    // - runs callables named test_*
-    // - records AssertionError vs other Exception
-    // - emits JSON between stable markers
     const gradeScript = `
 import json, runpy, traceback
 
@@ -114,13 +138,8 @@ def run_tests(tests_path):
     except Exception:
       checks.append({"id": name, "name": name, "passed": False, "message": traceback.format_exc()})
 
-  return {
-    "total": len(tests),
-    "passed": passed_count,
-    "checks": checks
-  }
+  return {"total": len(tests), "passed": passed_count, "checks": checks}
 
-# Write student file already present; now run tests against it.
 report = run_tests(${JSON.stringify("/hydrae/tests/tests.py")})
 
 print(JSON_START)
@@ -134,16 +153,16 @@ print(JSON_END)
       [gradeEntrypoint]: gradeScript
     };
 
-    const runner = await runPython({
+    const runnerRaw = await runPython({
       files,
       entrypoint: gradeEntrypoint,
       stdin: exercise.runner?.stdin ?? ""
     });
 
-    const report = extractGradeJson(runner.stdout || "");
+    const runner = normalize(runnerRaw);
+    const report = extractGradeJson(runner?.stdout || "");
 
-    // If runner crashed or report missing, fail deterministically.
-    if (runner.status?.ok !== true || !report || typeof report.total !== "number") {
+    if (runner?.status?.ok !== true || !report || typeof report.total !== "number") {
       return {
         passed: false,
         score: 0,
@@ -157,7 +176,7 @@ print(JSON_END)
     const passedCount = report.passed || 0;
 
     const perTest = total > 0 ? points / total : 0;
-    const score = Math.round((passedCount * perTest) * 1000) / 1000; // stable-ish rounding
+    const score = Math.round((passedCount * perTest) * 1000) / 1000;
 
     const passed = score >= passThreshold;
 
