@@ -33,10 +33,10 @@
   },
 
   "grading": {
-    "type": "harness_v1",
-    "points": 1,
-    "pass_condition": { "stdout_includes": "__PASS__" },
-    "harness": { "inline": "print('__PASS__')" }
+    "type": "tests_v1",
+    "points": 10,
+    "pass_threshold": 10,
+    "tests": { "path": "./tests/tests.py" }
   },
 
   "hints": {
@@ -48,7 +48,7 @@
 
   "ui": {
     "editor": { "mode": "single_file", "focus_file": "main.py" },
-    "panels": { "prompt": true, "console": true, "tests": "never" }
+    "panels": { "prompt": true, "console": true, "tests": "on_fail" }
   },
 
   "metadata": {

@@ -46,6 +46,7 @@ export async function loadExercise(exerciseJsonPath) {
   const assets = await materializeFileMap(exercise.files?.assets, baseUrl);
 
   return {
+    baseUrl: baseUrl.href,
     exercise,
     promptText,
     files: {

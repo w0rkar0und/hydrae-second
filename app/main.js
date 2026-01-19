@@ -7,7 +7,6 @@ const $ = (id) => document.getElementById(id);
 function buildRunFiles(loaded, editorText) {
   const entry = loaded.files.entrypoint;
 
-  // Merge starter + readonly + assets, then overwrite entrypoint with editor content
   const files = {
     ...(loaded.files.starter || {}),
     ...(loaded.files.readonly || {}),
@@ -53,8 +52,7 @@ async function boot() {
     $("stderr").textContent = "";
     $("result").textContent = "Grading...";
 
-    // For harness grading we only need studentCode; grader constructs its own VFS files.
-    const grade = await gradeAttempt(exercise, $("code").value);
+    const grade = await gradeAttempt(exercise, $("code").value, loaded.baseUrl);
 
     $("stdout").textContent = grade.runner?.stdout || "";
     $("stderr").textContent = grade.runner?.stderr || "";
