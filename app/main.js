@@ -15,6 +15,12 @@ function stripMarkedBlock(text) {
   return (s.slice(0, a) + s.slice(b + JSON_END.length)).trim();
 }
 
+async function fetchJson(path) {
+  const res = await fetch(path, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Failed to fetch JSON: ${path} (${res.status})`);
+  return await res.json();
+}
+
 function buildRunFiles(loaded, editorText) {
   const entry = loaded.files.entrypoint;
 
@@ -28,8 +34,47 @@ function buildRunFiles(loaded, editorText) {
   return files;
 }
 
+function getSelectedExercisePath(indexData) {
+  const hash = (window.location.hash || "").replace(/^#/, "").trim();
+  if (hash) {
+    const found = (indexData.exercises || []).find((e) => e.id === hash);
+    if (found?.path) return found.path;
+  }
+  return (indexData.exercises || [])[0]?.path;
+}
+
+async function populateSelect(indexData) {
+  const sel = $("exercise-select");
+  sel.innerHTML = "";
+
+  for (const ex of indexData.exercises || []) {
+    const opt = document.createElement("option");
+    opt.value = ex.path;
+    opt.textContent = `${ex.id} — ${ex.title || ""}`.trim();
+    sel.appendChild(opt);
+  }
+
+  const initialPath = getSelectedExercisePath(indexData);
+  if (initialPath) sel.value = initialPath;
+
+  sel.onchange = () => {
+    const chosen = sel.value;
+    const match = (indexData.exercises || []).find((e) => e.path === chosen);
+    if (match?.id) window.location.hash = match.id;
+    // reload whole page state simply for MVP
+    window.location.reload();
+  };
+
+  return sel.value;
+}
+
 async function boot() {
-  const loaded = await loadExercise("./exercises/py.basics.001/exercise.json");
+  const indexData = await fetchJson("./exercises/index.json");
+  const exercisePath = await populateSelect(indexData);
+
+  await ensurePyodide();
+
+  const loaded = await loadExercise(exercisePath);
   const exercise = loaded.exercise;
 
   $("exercise-title").textContent = exercise.title;
@@ -37,8 +82,6 @@ async function boot() {
 
   const entry = loaded.files.entrypoint;
   $("code").value = loaded.files.starter?.[entry] ?? "";
-
-  await ensurePyodide();
 
   $("run").onclick = async () => {
     $("stdout").textContent = "";
@@ -65,7 +108,6 @@ async function boot() {
 
     const grade = await gradeAttempt(exercise, $("code").value, loaded.baseUrl);
 
-    // Hide the embedded JSON report from the visible stdout panel
     $("stdout").textContent = stripMarkedBlock(grade.runner?.stdout || "");
     $("stderr").textContent = grade.runner?.stderr || "";
     $("result").textContent = JSON.stringify(grade, null, 2);

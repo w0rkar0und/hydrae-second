@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "id": "py.basics.002",
+  "version": 1,
+  "title": "Functions: add(a, b)",
+  "tags": ["basics", "functions"],
+  "difficulty": 1,
+
+  "prompt": {
+    "format": "markdown",
+    "path": "./prompt.md",
+    "inline": null
+  },
+
+  "files": {
+    "entrypoint": "main.py",
+    "starter": {
+      "main.py": { "inline": "def add(a, b):\n  # TODO: return the sum\n  return 0\n" }
+    },
+    "readonly": {},
+    "assets": {}
+  },
+
+  "runner": {
+    "mode": "run",
+    "engine": "pyodide",
+    "python": "3.12",
+    "stdin": "",
+    "argv": [],
+    "env": {},
+    "limits": { "time_ms": 1500, "memory_mb": 128 },
+    "trace": { "enabled": false, "kind": "none" }
+  },
+
+  "grading": {
+    "type": "tests_v1",
+    "points": 10,
+    "pass_threshold": 10,
+    "tests": { "path": "./tests/tests.py" }
+  },
+
+  "hints": {
+    "enabled": true,
+    "max_hints": 3,
+    "levels": ["nudge", "concept", "near_solution"],
+    "rules": { "no_full_solution": true, "max_code_lines": 6, "prefer_questions": true }
+  },
+
+  "ui": {
+    "editor": { "mode": "single_file", "focus_file": "main.py" },
+    "panels": { "prompt": true, "console": true, "tests": "on_fail" }
+  },
+
+  "metadata": {
+    "author": "hydrae",
+    "created_utc": "2026-01-19T00:00:00Z",
+    "updated_utc": "2026-01-19T00:00:00Z"
+  }
+}
