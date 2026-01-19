@@ -72,11 +72,19 @@ function setBoot(msg) {
   if (el) el.textContent = `Boot status: ${msg}`;
 }
 
+function formatError(err) {
+  const name = err?.name ? String(err.name) : "Error";
+  const msg = err?.message ? String(err.message) : String(err);
+  const stack = err?.stack ? String(err.stack) : "";
+  // Always include message + stack (stack alone is often useless)
+  return stack ? `${name}: ${msg}\n\n${stack}` : `${name}: ${msg}`;
+}
+
 function showError(err) {
-  const msg = err?.stack ? String(err.stack) : String(err);
+  const txt = formatError(err);
   setBoot("ERROR (see stderr)");
-  $("stderr").textContent = msg;
-  $("result").textContent = JSON.stringify({ error: msg }, null, 2);
+  $("stderr").textContent = txt;
+  $("result").textContent = JSON.stringify({ error: txt }, null, 2);
 }
 
 async function boot() {
