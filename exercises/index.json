@@ -4,12 +4,12 @@
     {
       "id": "py.basics.001",
       "title": "Hello, stdout",
-      "path": "./py.basics.001/exercise.json"
+      "path": "./exercises/py.basics.001/exercise.json"
     },
     {
       "id": "py.basics.002",
       "title": "Functions: add(a, b)",
-      "path": "./py.basics.002/exercise.json"
+      "path": "./exercises/py.basics.002/exercise.json"
     }
   ]
 }
