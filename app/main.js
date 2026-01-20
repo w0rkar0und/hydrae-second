@@ -8,27 +8,13 @@ import {
   updateDraft,
   recordAttempt,
   exportProgressJson,
-  mergeProgress
+  mergeProgress,
+  clearDraft,
+  clearExerciseProgress
 } from "./progress.js";
+import { stripMarkedBlock, fetchJson, formatError, readFileAsText, downloadText } from "./utils.js";
 
 const $ = (id) => document.getElementById(id);
-
-const JSON_START = "___HYDRAE_GRADE_JSON_START___";
-const JSON_END = "___HYDRAE_GRADE_JSON_END___";
-
-function stripMarkedBlock(text) {
-  const s = String(text || "");
-  const a = s.indexOf(JSON_START);
-  const b = s.indexOf(JSON_END);
-  if (a === -1 || b === -1 || b <= a) return s;
-  return (s.slice(0, a) + s.slice(b + JSON_END.length)).trim();
-}
-
-async function fetchJson(path) {
-  const res = await fetch(path, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to fetch JSON: ${path} (${res.status})`);
-  return await res.json();
-}
 
 function setBoot(msg) {
   const el = $("boot-status");
@@ -38,13 +24,6 @@ function setBoot(msg) {
 function setProgressStatus(msg) {
   const el = $("progress-status");
   if (el) el.textContent = msg ? String(msg) : "";
-}
-
-function formatError(err) {
-  const name = err?.name ? String(err.name) : "Error";
-  const msg = err?.message ? String(err.message) : String(err);
-  const stack = err?.stack ? String(err.stack) : "";
-  return stack ? `${name}: ${msg}\n\n${stack}` : `${name}: ${msg}`;
 }
 
 function showError(err) {
@@ -75,42 +54,18 @@ function findExerciseById(indexData, id) {
   return (indexData.exercises || []).find((e) => e.id === id) || null;
 }
 
-async function readFileAsText(file) {
-  return await new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result || ""));
-    r.onerror = () => reject(r.error || new Error("Failed to read file"));
-    r.readAsText(file);
-  });
-}
-
-function downloadText(filename, text) {
-  const blob = new Blob([text], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-
-  URL.revokeObjectURL(url);
-}
-
 async function boot() {
   try {
     setBoot("loading index ...");
     const indexData = await fetchJson("./exercises/index.json");
 
-    setBoot("loading pyodide ...");
+    setBoot("loading pyodide (first time may take a while) ...");
     await ensurePyodide();
+    setBoot("pyodide ready");
 
-    // Progress
     let progress = loadProgress();
     const saveDraftsCheckbox = $("save-drafts");
 
-    // In-memory current exercise
     const sel = $("exercise-select");
     sel.innerHTML = "";
 
@@ -125,7 +80,8 @@ async function boot() {
       id: null,
       path: null,
       loaded: null,
-      entry: null
+      entry: null,
+      starterCode: ""
     };
 
     function maybeSaveDraft() {
@@ -133,7 +89,6 @@ async function boot() {
       if (!current.id) return;
       updateDraft(progress, current.id, $("code").value);
       saveProgress(progress);
-      setProgressStatus(`Draft saved for ${current.id}`);
     }
 
     function renderProgressFor(exId) {
@@ -151,35 +106,30 @@ async function boot() {
     }
 
     async function loadByPath(path) {
-      setBoot(`loading exercise: ${path} ...`);
-
-      // Save draft of outgoing exercise (optional)
       maybeSaveDraft();
+
+      setBoot(`loading exercise: ${path} ...`);
 
       const loaded = await loadExercise(path);
       const exercise = loaded.exercise;
       const entry = loaded.files.entrypoint;
       const exId = exercise.id;
 
-      // Update UI
+      const starterCode = loaded.files.starter?.[entry] ?? "";
+
       $("exercise-title").textContent = exercise.title;
       $("exercise-prompt").textContent = loaded.promptText || "";
 
-      // Choose code: saved draft (if enabled) > starter
       const exP = getExerciseProgress(progress, exId);
       const draftCode = saveDraftsCheckbox?.checked ? exP.draft?.code : null;
+      $("code").value = (typeof draftCode === "string") ? draftCode : starterCode;
 
-      $("code").value = (typeof draftCode === "string") ? draftCode : (loaded.files.starter?.[entry] ?? "");
-
-      // Clear outputs
       $("stdout").textContent = "";
       $("stderr").textContent = "";
       $("result").textContent = "";
 
-      // Update current
-      current = { id: exId, path, loaded, entry };
+      current = { id: exId, path, loaded, entry, starterCode };
 
-      // Hash sync
       window.location.hash = exId;
       sel.value = path;
 
@@ -187,7 +137,6 @@ async function boot() {
       renderProgressFor(exId);
     }
 
-    // Initial exercise
     const initialId = getHashId();
     const initialEx = initialId ? findExerciseById(indexData, initialId) : null;
     const initialPath = initialEx?.path || (indexData.exercises || [])[0]?.path;
@@ -195,7 +144,6 @@ async function boot() {
 
     await loadByPath(initialPath);
 
-    // Switch exercises without reload
     sel.onchange = async () => {
       try {
         await loadByPath(sel.value);
@@ -204,7 +152,6 @@ async function boot() {
       }
     };
 
-    // Hash changes (back/forward)
     window.addEventListener("hashchange", async () => {
       const id = getHashId();
       if (!id) return;
@@ -220,7 +167,6 @@ async function boot() {
       }
     });
 
-    // Autosave draft on pause (simple debounce)
     let draftTimer = null;
     $("code").addEventListener("input", () => {
       if (!saveDraftsCheckbox?.checked) return;
@@ -233,20 +179,62 @@ async function boot() {
       }, 700);
     });
 
-    // Export progress
+    saveDraftsCheckbox.addEventListener("change", () => {
+      try {
+        if (!current.id) return;
+        if (!saveDraftsCheckbox.checked) {
+          clearDraft(progress, current.id);
+          saveProgress(progress);
+          $("code").value = current.starterCode;
+        } else {
+          updateDraft(progress, current.id, $("code").value);
+          saveProgress(progress);
+        }
+        renderProgressFor(current.id);
+      } catch (err) {
+        showError(err);
+      }
+    });
+
+    $("reset-draft").onclick = () => {
+      try {
+        if (!current.id) return;
+        $("code").value = current.starterCode;
+        clearDraft(progress, current.id);
+        if (saveDraftsCheckbox.checked) {
+          updateDraft(progress, current.id, $("code").value);
+        }
+        saveProgress(progress);
+        renderProgressFor(current.id);
+      } catch (err) {
+        showError(err);
+      }
+    };
+
+    $("clear-exercise-progress").onclick = () => {
+      try {
+        if (!current.id) return;
+        clearExerciseProgress(progress, current.id);
+        saveProgress(progress);
+        $("code").value = current.starterCode;
+        renderProgressFor(current.id);
+      } catch (err) {
+        showError(err);
+      }
+    };
+
     $("export-progress").onclick = () => {
       try {
         maybeSaveDraft();
         const json = exportProgressJson(progress);
         const name = `hydrae_progress_${new Date().toISOString().slice(0, 10)}.json`;
-        downloadText(name, json);
+        downloadText(name, json, "application/json");
         setProgressStatus("Exported progress JSON.");
       } catch (err) {
         showError(err);
       }
     };
 
-    // Import progress
     $("import-progress").onclick = () => {
       $("import-file").value = "";
       $("import-file").click();
@@ -263,12 +251,9 @@ async function boot() {
         progress = mergeProgress(progress, incoming);
         saveProgress(progress);
 
-        // If drafts saving is on, update editor to imported draft for current exercise (if newer)
-        if (saveDraftsCheckbox?.checked && current.id) {
+        if (saveDraftsCheckbox.checked && current.id) {
           const exP = getExerciseProgress(progress, current.id);
-          if (typeof exP.draft?.code === "string") {
-            $("code").value = exP.draft.code;
-          }
+          if (typeof exP.draft?.code === "string") $("code").value = exP.draft.code;
         }
 
         renderProgressFor(current.id);
@@ -278,7 +263,6 @@ async function boot() {
       }
     };
 
-    // Run
     $("run").onclick = async () => {
       $("stdout").textContent = "";
       $("stderr").textContent = "";
@@ -290,10 +274,8 @@ async function boot() {
         const loaded = current.loaded;
         const exercise = loaded.exercise;
 
-        const files = buildRunFiles(loaded, $("code").value);
-
         const res = await runPython({
-          files,
+          files: buildRunFiles(loaded, $("code").value),
           entrypoint: current.entry,
           stdin: exercise.runner?.stdin ?? ""
         });
@@ -306,7 +288,6 @@ async function boot() {
       }
     };
 
-    // Grade
     $("grade").onclick = async () => {
       $("stdout").textContent = "";
       $("stderr").textContent = "";
@@ -320,7 +301,6 @@ async function boot() {
 
         const grade = await gradeAttempt(exercise, $("code").value, loaded.baseUrl);
 
-        // Persist attempt
         if (current.id) {
           recordAttempt(progress, current.id, grade);
           saveProgress(progress);
@@ -335,6 +315,8 @@ async function boot() {
         showError(err);
       }
     };
+
+    setBoot("ready (handlers attached)");
   } catch (err) {
     showError(err);
   }

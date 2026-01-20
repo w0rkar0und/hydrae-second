@@ -1,4 +1,4 @@
-const STORAGE_KEY = "hydrae_progress_v1";
+import { PROGRESS_STORAGE_KEY } from "./config.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -13,7 +13,7 @@ function safeParse(jsonText) {
 }
 
 export function loadProgress() {
-  const raw = localStorage.getItem(STORAGE_KEY);
+  const raw = localStorage.getItem(PROGRESS_STORAGE_KEY);
   if (!raw) {
     return {
       schema_version: "1.0",
@@ -43,7 +43,7 @@ export function loadProgress() {
 
 export function saveProgress(progress) {
   progress.updated_utc = nowIso();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify(progress));
 }
 
 export function getExerciseProgress(progress, exerciseId) {
@@ -65,8 +65,16 @@ export function updateDraft(progress, exerciseId, code) {
   };
 }
 
+export function clearDraft(progress, exerciseId) {
+  const ex = getExerciseProgress(progress, exerciseId);
+  ex.draft = null;
+}
+
+export function clearExerciseProgress(progress, exerciseId) {
+  delete progress.exercises[exerciseId];
+}
+
 export function recordAttempt(progress, exerciseId, attempt) {
-  // attempt: { passed, score, max_score, checks? }
   const ex = getExerciseProgress(progress, exerciseId);
 
   const cleaned = {
@@ -74,16 +82,17 @@ export function recordAttempt(progress, exerciseId, attempt) {
     score: Number(attempt.score ?? 0),
     max_score: Number(attempt.max_score ?? 0),
     attempted_utc: nowIso(),
-    checks: Array.isArray(attempt.checks) ? attempt.checks.map(c => ({
-      id: String(c.id ?? ""),
-      passed: !!c.passed,
-      message: String(c.message ?? "")
-    })) : []
+    checks: Array.isArray(attempt.checks)
+      ? attempt.checks.map((c) => ({
+          id: String(c.id ?? ""),
+          passed: !!c.passed,
+          message: String(c.message ?? "")
+        }))
+      : []
   };
 
   ex.last = cleaned;
 
-  // Update best: prefer higher score; tie-breaker: passed true
   const best = ex.best || { passed: false, score: 0, max_score: 0 };
   const bestScore = Number(best.score ?? 0);
   const newScore = cleaned.score;
@@ -107,17 +116,12 @@ export function exportProgressJson(progress) {
 }
 
 export function mergeProgress(base, incoming) {
-  // Merge per exercise:
-  // - best: keep higher score (tie: passed)
-  // - last: keep most recent attempted_utc
-  // - draft: keep most recent saved_utc
   if (!incoming || typeof incoming !== "object") return base;
   if (!incoming.exercises || typeof incoming.exercises !== "object") return base;
 
   for (const [id, incEx] of Object.entries(incoming.exercises)) {
     const baseEx = getExerciseProgress(base, id);
 
-    // best
     if (incEx?.best) {
       const b = baseEx.best || { passed: false, score: 0, max_score: 0 };
       const i = incEx.best;
@@ -138,22 +142,16 @@ export function mergeProgress(base, incoming) {
       }
     }
 
-    // last
     if (incEx?.last) {
       const bT = baseEx.last?.attempted_utc ? Date.parse(baseEx.last.attempted_utc) : 0;
       const iT = incEx.last?.attempted_utc ? Date.parse(incEx.last.attempted_utc) : 0;
-      if (iT && iT >= bT) {
-        baseEx.last = incEx.last;
-      }
+      if (iT && iT >= bT) baseEx.last = incEx.last;
     }
 
-    // draft
     if (incEx?.draft) {
       const bT = baseEx.draft?.saved_utc ? Date.parse(baseEx.draft.saved_utc) : 0;
       const iT = incEx.draft?.saved_utc ? Date.parse(incEx.draft.saved_utc) : 0;
-      if (iT && iT >= bT) {
-        baseEx.draft = incEx.draft;
-      }
+      if (iT && iT >= bT) baseEx.draft = incEx.draft;
     }
   }
 

@@ -1,54 +1,15 @@
 import { runPython } from "./runner.js";
+import { JSON_START, JSON_END } from "./config.js";
+import { fetchText, normalize, extractMarkedJson } from "./utils.js";
 
-const JSON_START = "___HYDRAE_GRADE_JSON_START___";
-const JSON_END = "___HYDRAE_GRADE_JSON_END___";
+const testsCache = new Map(); // url.href -> code string
 
-async function fetchText(url) {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to fetch: ${url} (${res.status})`);
-  return await res.text();
-}
-
-// Convert arrays-of-[k,v] pairs / Maps / nested mixtures into plain objects
-function normalize(value) {
-  if (value === null || value === undefined) return value;
-
-  if (Array.isArray(value)) {
-    if (value.length > 0 && Array.isArray(value[0]) && value[0].length === 2) {
-      const obj = {};
-      for (const [k, v] of value) obj[String(k)] = normalize(v);
-      return obj;
-    }
-    return value.map(normalize);
-  }
-
-  if (value instanceof Map) {
-    const obj = {};
-    for (const [k, v] of value.entries()) obj[String(k)] = normalize(v);
-    return obj;
-  }
-
-  if (typeof value === "object") {
-    const obj = {};
-    for (const [k, v] of Object.entries(value)) obj[k] = normalize(v);
-    return obj;
-  }
-
-  return value;
-}
-
-function extractGradeJson(stdout) {
-  const s = String(stdout || "");
-  const a = s.indexOf(JSON_START);
-  const b = s.indexOf(JSON_END);
-  if (a === -1 || b === -1 || b <= a) return null;
-
-  const jsonText = s.slice(a + JSON_START.length, b).trim();
-  try {
-    return JSON.parse(jsonText);
-  } catch (_) {
-    return null;
-  }
+async function getTestsCode(testsUrl) {
+  const key = String(testsUrl.href || testsUrl);
+  if (testsCache.has(key)) return testsCache.get(key);
+  const code = await fetchText(testsUrl);
+  testsCache.set(key, code);
+  return code;
 }
 
 export async function gradeAttempt(exercise, studentCode, exerciseBaseUrl) {
@@ -104,7 +65,7 @@ ${harness}
     }
 
     const testsUrl = new URL(testsRelPath, exerciseBaseUrl);
-    const testsCode = await fetchText(testsUrl);
+    const testsCode = await getTestsCode(testsUrl);
 
     const gradeEntrypoint = "__grade__.py";
     const points = grading.points ?? 1;
@@ -160,7 +121,7 @@ print(JSON_END)
     });
 
     const runner = normalize(runnerRaw);
-    const report = extractGradeJson(runner?.stdout || "");
+    const report = extractMarkedJson(runner?.stdout || "");
 
     if (runner?.status?.ok !== true || !report || typeof report.total !== "number") {
       return {

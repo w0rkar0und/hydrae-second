@@ -1,25 +1,4 @@
-async function fetchText(url) {
-  const u = String(url);
-  let res;
-  try {
-    res = await fetch(u, { cache: "no-store" });
-  } catch (e) {
-    throw new Error(`Network fetch failed for: ${u} (${e?.message || e})`);
-  }
-
-  if (!res.ok) {
-    const ct = res.headers.get("content-type") || "";
-    let body = "";
-    try {
-      body = ct.includes("text") ? await res.text() : "";
-    } catch (_) {}
-
-    const extra = body ? ` Body (truncated): ${body.slice(0, 200)}` : "";
-    throw new Error(`HTTP ${res.status} fetching: ${u}.${extra}`);
-  }
-
-  return await res.text();
-}
+import { fetchText } from "./utils.js";
 
 async function materializeFileMap(fileMap, baseUrl) {
   const out = {};
@@ -50,7 +29,6 @@ export async function loadExercise(exerciseJsonPath) {
 
   const exercise = JSON.parse(await fetchText(baseUrl));
 
-  // Prompt: inline wins, else path
   let promptText = "";
   if (exercise.prompt?.inline) {
     promptText = exercise.prompt.inline;
