@@ -14,6 +14,18 @@
     </section>
 
     <section>
+      <h2>Progress</h2>
+      <button id="export-progress">Export progress (JSON)</button>
+      <button id="import-progress">Import progress (JSON)</button>
+      <label style="margin-left: 12px;">
+        <input type="checkbox" id="save-drafts" checked />
+        Save drafts locally
+      </label>
+      <input id="import-file" type="file" accept="application/json" style="display:none;" />
+      <pre id="progress-status"></pre>
+    </section>
+
+    <section>
       <h2>Exercise</h2>
       <label>
         Select:
