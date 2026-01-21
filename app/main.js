@@ -63,6 +63,7 @@ async function boot() {
 
     let progress = loadProgress();
     const saveDraftsCheckbox = $("save-drafts");
+    const codeEl = $("code");
 
     const sel = $("exercise-select");
     sel.innerHTML = "";
@@ -81,31 +82,33 @@ async function boot() {
       starterCode: ""
     };
 
-    // ===== Unsaved changes guard (explicit dirty flag) =====
-    let dirty = false;
+    // ===== Unsaved changes guard (baseline compare, very reliable) =====
+    let lastSavedCode = ""; // baseline string
+    const isDirty = () => String(codeEl.value || "") !== String(lastSavedCode || "");
 
-    window.addEventListener("beforeunload", (e) => {
-      if (!dirty) return;
+    const beforeUnloadHandler = (e) => {
+      if (!isDirty()) return;
       e.preventDefault();
+      // Required by some browsers to trigger the confirmation dialog
       e.returnValue = "You have unsaved changes.";
       return "You have unsaved changes.";
-    });
+    };
 
-    function markClean() {
-      dirty = false;
-    }
+    // Register both ways (browser quirks)
+    window.onbeforeunload = beforeUnloadHandler;
+    window.addEventListener("beforeunload", beforeUnloadHandler);
 
-    function markDirty() {
-      dirty = true;
-    }
-    // ======================================================
+    const markSavedBaseline = () => {
+      lastSavedCode = String(codeEl.value || "");
+    };
+    // ================================================================
 
     function maybeSaveDraft() {
       if (!saveDraftsCheckbox?.checked) return;
       if (!current.id) return;
-      updateDraft(progress, current.id, $("code").value);
+      updateDraft(progress, current.id, codeEl.value);
       saveProgress(progress);
-      markClean();
+      markSavedBaseline();
     }
 
     function renderProgressFor(exId) {
@@ -121,11 +124,15 @@ async function boot() {
         parts.push(`Last attempt: ${last.attempted_utc} — ${last.score}/${last.max_score} (${last.passed ? "PASSED" : "FAILED"})`);
       if (saveDraftsCheckbox?.checked && exP.draft?.saved_utc)
         parts.push(`Draft saved: ${exP.draft.saved_utc}`);
+
+      // Debug line (remove later if you want)
+      parts.push(`Dirty: ${isDirty() ? "YES" : "NO"}`);
+
       setProgressStatus(parts.join("\n"));
     }
 
     async function loadByPath(path) {
-      // save outgoing draft (if enabled) to avoid false warnings on exercise switch
+      // If drafts ON, save outgoing so switching exercises doesn't trigger warnings
       maybeSaveDraft();
 
       setBoot(`loading exercise: ${path} ...`);
@@ -142,7 +149,7 @@ async function boot() {
 
       const exP = getExerciseProgress(progress, exId);
       const draftCode = saveDraftsCheckbox?.checked ? exP.draft?.code : null;
-      $("code").value = (typeof draftCode === "string") ? draftCode : starterCode;
+      codeEl.value = (typeof draftCode === "string") ? draftCode : starterCode;
 
       $("stdout").textContent = "";
       $("stderr").textContent = "";
@@ -152,7 +159,8 @@ async function boot() {
       window.location.hash = exId;
       sel.value = path;
 
-      markClean();
+      // Baseline becomes whatever we just loaded
+      markSavedBaseline();
 
       setBoot("ready (handlers attached)");
       renderProgressFor(exId);
@@ -179,17 +187,19 @@ async function boot() {
 
     // Autosave drafts (debounced)
     let draftTimer = null;
-    $("code").addEventListener("input", () => {
-      markDirty();
-
-      if (!saveDraftsCheckbox?.checked) return;
-      if (draftTimer) clearTimeout(draftTimer);
-      draftTimer = setTimeout(() => {
-        try {
-          maybeSaveDraft();
-          renderProgressFor(current.id);
-        } catch (_) {}
-      }, 700);
+    codeEl.addEventListener("input", () => {
+      if (saveDraftsCheckbox?.checked) {
+        if (draftTimer) clearTimeout(draftTimer);
+        draftTimer = setTimeout(() => {
+          try {
+            maybeSaveDraft();
+            renderProgressFor(current.id);
+          } catch (_) {}
+        }, 700);
+      } else {
+        // drafts off: just update the debug display
+        renderProgressFor(current.id);
+      }
     });
 
     saveDraftsCheckbox.addEventListener("change", () => {
@@ -197,16 +207,14 @@ async function boot() {
         if (!current.id) return;
 
         if (!saveDraftsCheckbox.checked) {
-          // turning OFF drafts: clear stored draft; edits become unsaved until user exports/imports etc.
           clearDraft(progress, current.id);
           saveProgress(progress);
-          // Keep current editor content as-is; user might be mid-edit
-          // We do NOT mark clean here.
+          // Do NOT change baseline; if user has edits, they remain dirty (and should warn)
         } else {
-          // turning ON: immediately save current editor as draft (marks clean)
-          updateDraft(progress, current.id, $("code").value);
+          // turning ON: save immediately, which also updates baseline -> clean
+          updateDraft(progress, current.id, codeEl.value);
           saveProgress(progress);
-          markClean();
+          markSavedBaseline();
         }
 
         renderProgressFor(current.id);
@@ -217,16 +225,16 @@ async function boot() {
       try {
         if (!current.id) return;
 
-        $("code").value = current.starterCode;
+        codeEl.value = current.starterCode;
         clearDraft(progress, current.id);
 
         if (saveDraftsCheckbox.checked) {
-          updateDraft(progress, current.id, $("code").value);
+          updateDraft(progress, current.id, codeEl.value);
           saveProgress(progress);
-          markClean();
+          markSavedBaseline();
         } else {
           saveProgress(progress);
-          markDirty(); // drafts off => this is an unsaved local change
+          // baseline stays as-is => this will be dirty unless baseline was also starter
         }
 
         renderProgressFor(current.id);
@@ -240,14 +248,14 @@ async function boot() {
         clearExerciseProgress(progress, current.id);
         saveProgress(progress);
 
-        $("code").value = current.starterCode;
+        codeEl.value = current.starterCode;
 
         if (saveDraftsCheckbox.checked) {
-          updateDraft(progress, current.id, $("code").value);
+          updateDraft(progress, current.id, codeEl.value);
           saveProgress(progress);
-          markClean();
+          markSavedBaseline();
         } else {
-          markDirty();
+          // baseline unchanged
         }
 
         renderProgressFor(current.id);
@@ -261,7 +269,6 @@ async function boot() {
         const name = `hydrae_progress_${new Date().toISOString().slice(0, 10)}.json`;
         downloadText(name, json, "application/json");
         setProgressStatus("Exported progress JSON.");
-        // exporting doesn't necessarily mean local editor content is saved unless drafts are on
       } catch (err) { showError(err); }
     };
 
@@ -284,8 +291,8 @@ async function boot() {
         if (saveDraftsCheckbox.checked && current.id) {
           const exP = getExerciseProgress(progress, current.id);
           if (typeof exP.draft?.code === "string") {
-            $("code").value = exP.draft.code;
-            markClean();
+            codeEl.value = exP.draft.code;
+            markSavedBaseline();
           }
         }
 
@@ -308,7 +315,7 @@ async function boot() {
         const exercise = loaded.exercise;
 
         const res = await runPython({
-          files: buildRunFiles(loaded, $("code").value),
+          files: buildRunFiles(loaded, codeEl.value),
           entrypoint: current.entry,
           stdin: exercise.runner?.stdin ?? ""
         });
@@ -316,6 +323,8 @@ async function boot() {
         $("stdout").textContent = res.stdout || "";
         $("stderr").textContent = res.stderr || "";
         $("result").textContent = JSON.stringify(res.status, null, 2);
+
+        renderProgressFor(current.id);
       } catch (err) { showError(err); }
     };
 
@@ -332,7 +341,7 @@ async function boot() {
         const loaded = current.loaded;
         const exercise = loaded.exercise;
 
-        const grade = await gradeAttempt(exercise, $("code").value, loaded.baseUrl);
+        const grade = await gradeAttempt(exercise, codeEl.value, loaded.baseUrl);
 
         if (current.id) {
           recordAttempt(progress, current.id, grade);
@@ -348,7 +357,6 @@ async function boot() {
     };
 
     // ===== Keyboard shortcuts (Firefox-safe) =====
-    const codeEl = $("code");
     const shortcutHandler = (e) => {
       const accel = e.metaKey || e.ctrlKey;
       if (!accel) return;
@@ -372,7 +380,7 @@ async function boot() {
     });
     // ===========================================
 
-    markClean();
+    // initial baseline already set by loadByPath()
     setBoot("ready (handlers attached)");
   } catch (err) {
     showError(err);
