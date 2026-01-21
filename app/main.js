@@ -81,11 +81,43 @@ async function boot() {
       starterCode: ""
     };
 
+    // ===== Unsaved changes tracking =====
+    let lastSavedBaseline = ""; // what we consider "saved" right now
+    let dirty = false;
+
+    function computeBaselineForCurrent() {
+      if (!current.id) return current.starterCode || "";
+      const exP = getExerciseProgress(progress, current.id);
+      if (saveDraftsCheckbox?.checked && typeof exP.draft?.code === "string") return exP.draft.code;
+      return current.starterCode || "";
+    }
+
+    function refreshDirtyState() {
+      const baseline = computeBaselineForCurrent();
+      const now = String($("code").value || "");
+      dirty = (now !== baseline);
+    }
+
+    function setBaselineToCurrentEditor() {
+      lastSavedBaseline = String($("code").value || "");
+      dirty = false;
+    }
+
+    window.addEventListener("beforeunload", (e) => {
+      refreshDirtyState();
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    });
+    // ===================================
+
     function maybeSaveDraft() {
       if (!saveDraftsCheckbox?.checked) return;
       if (!current.id) return;
       updateDraft(progress, current.id, $("code").value);
       saveProgress(progress);
+      // after saving, baseline becomes current editor (not dirty)
+      setBaselineToCurrentEditor();
     }
 
     function renderProgressFor(exId) {
@@ -105,7 +137,9 @@ async function boot() {
     }
 
     async function loadByPath(path) {
+      // Save outgoing draft if enabled (also clears dirty)
       maybeSaveDraft();
+
       setBoot(`loading exercise: ${path} ...`);
 
       const loaded = await loadExercise(path);
@@ -130,6 +164,11 @@ async function boot() {
       window.location.hash = exId;
       sel.value = path;
 
+      // set baseline to whatever we just loaded into editor
+      setBaselineToCurrentEditor();
+      lastSavedBaseline = String($("code").value || "");
+      dirty = false;
+
       setBoot("ready (handlers attached)");
       renderProgressFor(exId);
     }
@@ -153,27 +192,38 @@ async function boot() {
       try { await loadByPath(ex.path); } catch (err) { showError(err); }
     });
 
-    // Autosave drafts
+    // Autosave drafts (debounced)
     let draftTimer = null;
     $("code").addEventListener("input", () => {
+      refreshDirtyState();
+
       if (!saveDraftsCheckbox?.checked) return;
       if (draftTimer) clearTimeout(draftTimer);
       draftTimer = setTimeout(() => {
-        try { maybeSaveDraft(); renderProgressFor(current.id); } catch (_) {}
+        try {
+          maybeSaveDraft();
+          renderProgressFor(current.id);
+        } catch (_) {}
       }, 700);
     });
 
     saveDraftsCheckbox.addEventListener("change", () => {
       try {
         if (!current.id) return;
+
         if (!saveDraftsCheckbox.checked) {
+          // turning OFF drafts: clear stored draft and baseline becomes starter
           clearDraft(progress, current.id);
           saveProgress(progress);
           $("code").value = current.starterCode;
+          setBaselineToCurrentEditor();
         } else {
+          // turning ON drafts: immediately save current editor as draft
           updateDraft(progress, current.id, $("code").value);
           saveProgress(progress);
+          setBaselineToCurrentEditor();
         }
+
         renderProgressFor(current.id);
       } catch (err) { showError(err); }
     });
@@ -181,10 +231,14 @@ async function boot() {
     $("reset-draft").onclick = () => {
       try {
         if (!current.id) return;
+
         $("code").value = current.starterCode;
         clearDraft(progress, current.id);
+
         if (saveDraftsCheckbox.checked) updateDraft(progress, current.id, $("code").value);
+
         saveProgress(progress);
+        setBaselineToCurrentEditor();
         renderProgressFor(current.id);
       } catch (err) { showError(err); }
     };
@@ -192,9 +246,12 @@ async function boot() {
     $("clear-exercise-progress").onclick = () => {
       try {
         if (!current.id) return;
+
         clearExerciseProgress(progress, current.id);
         saveProgress(progress);
+
         $("code").value = current.starterCode;
+        setBaselineToCurrentEditor();
         renderProgressFor(current.id);
       } catch (err) { showError(err); }
     };
@@ -218,59 +275,78 @@ async function boot() {
       try {
         const file = $("import-file").files?.[0];
         if (!file) return;
+
         const text = await readFileAsText(file);
         const incoming = JSON.parse(text);
+
         progress = mergeProgress(progress, incoming);
         saveProgress(progress);
+
         if (saveDraftsCheckbox.checked && current.id) {
           const exP = getExerciseProgress(progress, current.id);
           if (typeof exP.draft?.code === "string") $("code").value = exP.draft.code;
         }
+
+        setBaselineToCurrentEditor();
         renderProgressFor(current.id);
         setProgressStatus("Imported and merged progress JSON.");
       } catch (err) { showError(err); }
     };
 
-    // Run
+    // Run button
     const runBtn = $("run");
     runBtn.onclick = async () => {
       $("stdout").textContent = "";
       $("stderr").textContent = "";
       $("result").textContent = "Running...";
+
       try {
         maybeSaveDraft();
+
         const loaded = current.loaded;
         const exercise = loaded.exercise;
+
         const res = await runPython({
           files: buildRunFiles(loaded, $("code").value),
           entrypoint: current.entry,
           stdin: exercise.runner?.stdin ?? ""
         });
+
         $("stdout").textContent = res.stdout || "";
         $("stderr").textContent = res.stderr || "";
         $("result").textContent = JSON.stringify(res.status, null, 2);
+
+        // running doesn't change baseline; keep dirty state accurate
+        refreshDirtyState();
       } catch (err) { showError(err); }
     };
 
-    // Grade
+    // Grade button
     const gradeBtn = $("grade");
     gradeBtn.onclick = async () => {
       $("stdout").textContent = "";
       $("stderr").textContent = "";
       $("result").textContent = "Grading...";
+
       try {
         maybeSaveDraft();
+
         const loaded = current.loaded;
         const exercise = loaded.exercise;
+
         const grade = await gradeAttempt(exercise, $("code").value, loaded.baseUrl);
+
         if (current.id) {
           recordAttempt(progress, current.id, grade);
           saveProgress(progress);
         }
+
         $("stdout").textContent = stripMarkedBlock(grade.runner?.stdout || "");
         $("stderr").textContent = grade.runner?.stderr || "";
         $("result").textContent = JSON.stringify(grade, null, 2);
+
         renderProgressFor(current.id);
+        refreshDirtyState();
       } catch (err) { showError(err); }
     };
 
@@ -280,7 +356,8 @@ async function boot() {
       const accel = e.metaKey || e.ctrlKey;
       if (!accel) return;
 
-      const isEnter = (e.key === "Enter" || e.key === "NumpadEnter" || e.code === "Enter" || e.code === "NumpadEnter");
+      const isEnter =
+        (e.key === "Enter" || e.key === "NumpadEnter" || e.code === "Enter" || e.code === "NumpadEnter");
       if (!isEnter) return;
 
       e.preventDefault();
@@ -290,15 +367,17 @@ async function boot() {
       else runBtn.click();
     };
 
-    // Bind to textarea (reliable across browsers)
     codeEl.addEventListener("keydown", shortcutHandler);
-    // Also bind to document so it works if focus drifts
     document.addEventListener("keydown", (e) => {
       const tag = document.activeElement?.tagName;
       if (tag && tag !== "TEXTAREA" && tag !== "BODY") return;
       shortcutHandler(e);
     });
     // ===========================================
+
+    // initialize baseline/dirty once
+    lastSavedBaseline = String($("code").value || "");
+    dirty = false;
 
     setBoot("ready (handlers attached)");
   } catch (err) {
