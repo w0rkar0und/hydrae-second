@@ -13,12 +13,53 @@ import {
   clearExerciseProgress
 } from "./progress.js";
 import { stripMarkedBlock, fetchJson, formatError, readFileAsText, downloadText } from "./utils.js";
+import { BUILD_SHA, BUILT_UTC } from "./build.js";
 
 const $ = (id) => document.getElementById(id);
+
+function mustGet(id) {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`Missing element #${id}`);
+  return el;
+}
+
+function assertRequiredElements() {
+  const required = [
+    "boot-status",
+    "build-info",
+    "exercise-select",
+    "exercise-title",
+    "exercise-prompt",
+    "code",
+    "run",
+    "grade",
+    "stdout",
+    "stderr",
+    "result",
+    "export-progress",
+    "import-progress",
+    "import-file",
+    "save-drafts",
+    "reset-draft",
+    "clear-exercise-progress",
+    "progress-status"
+  ];
+
+  const missing = required.filter((id) => !document.getElementById(id));
+  if (missing.length) {
+    throw new Error(`Missing required elements: ${missing.map((m) => "#" + m).join(", ")}`);
+  }
+}
 
 function setBoot(msg) {
   const el = $("boot-status");
   if (el) el.textContent = `Boot status: ${msg}`;
+}
+
+function setBuildInfo() {
+  const el = $("build-info");
+  if (!el) return;
+  el.textContent = `Build: ${BUILD_SHA} (built ${BUILT_UTC})`;
 }
 
 function setProgressStatus(msg) {
@@ -29,8 +70,10 @@ function setProgressStatus(msg) {
 function showError(err) {
   const txt = formatError(err);
   setBoot("ERROR (see stderr)");
-  $("stderr").textContent = txt;
-  $("result").textContent = JSON.stringify({ error: txt }, null, 2);
+  const stderr = $("stderr");
+  const result = $("result");
+  if (stderr) stderr.textContent = txt;
+  if (result) result.textContent = JSON.stringify({ error: txt }, null, 2);
 }
 
 function buildRunFiles(loaded, editorText) {
@@ -54,6 +97,12 @@ function findExerciseById(indexData, id) {
 
 async function boot() {
   try {
+    assertRequiredElements();
+    setBuildInfo();
+
+    const bootStatus = mustGet("boot-status");
+    bootStatus.textContent = "Boot status: starting ...";
+
     setBoot("loading index ...");
     const indexData = await fetchJson("./exercises/index.json");
 
@@ -62,10 +111,10 @@ async function boot() {
     setBoot("pyodide ready");
 
     let progress = loadProgress();
-    const saveDraftsCheckbox = $("save-drafts");
-    const codeEl = $("code");
+    const saveDraftsCheckbox = mustGet("save-drafts");
+    const codeEl = mustGet("code");
 
-    const sel = $("exercise-select");
+    const sel = mustGet("exercise-select");
     sel.innerHTML = "";
     for (const ex of indexData.exercises || []) {
       const opt = document.createElement("option");
@@ -82,26 +131,22 @@ async function boot() {
       starterCode: ""
     };
 
-    // ===== Unsaved changes guard (baseline compare, very reliable) =====
-    let lastSavedCode = ""; // baseline string
+    // ===== Unsaved changes guard (baseline compare; drafts ON autosaves -> clean) =====
+    let lastSavedCode = "";
     const isDirty = () => String(codeEl.value || "") !== String(lastSavedCode || "");
 
     const beforeUnloadHandler = (e) => {
       if (!isDirty()) return;
       e.preventDefault();
-      // Required by some browsers to trigger the confirmation dialog
       e.returnValue = "You have unsaved changes.";
       return "You have unsaved changes.";
     };
 
-    // Register both ways (browser quirks)
     window.onbeforeunload = beforeUnloadHandler;
     window.addEventListener("beforeunload", beforeUnloadHandler);
 
-    const markSavedBaseline = () => {
-      lastSavedCode = String(codeEl.value || "");
-    };
-    // ================================================================
+    const markSavedBaseline = () => { lastSavedCode = String(codeEl.value || ""); };
+    // ===============================================================================
 
     function maybeSaveDraft() {
       if (!saveDraftsCheckbox?.checked) return;
@@ -125,14 +170,10 @@ async function boot() {
       if (saveDraftsCheckbox?.checked && exP.draft?.saved_utc)
         parts.push(`Draft saved: ${exP.draft.saved_utc}`);
 
-      // Debug line (remove later if you want)
-      parts.push(`Dirty: ${isDirty() ? "YES" : "NO"}`);
-
       setProgressStatus(parts.join("\n"));
     }
 
     async function loadByPath(path) {
-      // If drafts ON, save outgoing so switching exercises doesn't trigger warnings
       maybeSaveDraft();
 
       setBoot(`loading exercise: ${path} ...`);
@@ -144,22 +185,21 @@ async function boot() {
 
       const starterCode = loaded.files.starter?.[entry] ?? "";
 
-      $("exercise-title").textContent = exercise.title;
-      $("exercise-prompt").textContent = loaded.promptText || "";
+      mustGet("exercise-title").textContent = exercise.title;
+      mustGet("exercise-prompt").textContent = loaded.promptText || "";
 
       const exP = getExerciseProgress(progress, exId);
       const draftCode = saveDraftsCheckbox?.checked ? exP.draft?.code : null;
       codeEl.value = (typeof draftCode === "string") ? draftCode : starterCode;
 
-      $("stdout").textContent = "";
-      $("stderr").textContent = "";
-      $("result").textContent = "";
+      mustGet("stdout").textContent = "";
+      mustGet("stderr").textContent = "";
+      mustGet("result").textContent = "";
 
       current = { id: exId, path, loaded, entry, starterCode };
       window.location.hash = exId;
       sel.value = path;
 
-      // Baseline becomes whatever we just loaded
       markSavedBaseline();
 
       setBoot("ready (handlers attached)");
@@ -196,9 +236,6 @@ async function boot() {
             renderProgressFor(current.id);
           } catch (_) {}
         }, 700);
-      } else {
-        // drafts off: just update the debug display
-        renderProgressFor(current.id);
       }
     });
 
@@ -209,9 +246,8 @@ async function boot() {
         if (!saveDraftsCheckbox.checked) {
           clearDraft(progress, current.id);
           saveProgress(progress);
-          // Do NOT change baseline; if user has edits, they remain dirty (and should warn)
+          // baseline unchanged; user may be dirty now
         } else {
-          // turning ON: save immediately, which also updates baseline -> clean
           updateDraft(progress, current.id, codeEl.value);
           saveProgress(progress);
           markSavedBaseline();
@@ -221,7 +257,7 @@ async function boot() {
       } catch (err) { showError(err); }
     });
 
-    $("reset-draft").onclick = () => {
+    mustGet("reset-draft").onclick = () => {
       try {
         if (!current.id) return;
 
@@ -234,14 +270,13 @@ async function boot() {
           markSavedBaseline();
         } else {
           saveProgress(progress);
-          // baseline stays as-is => this will be dirty unless baseline was also starter
         }
 
         renderProgressFor(current.id);
       } catch (err) { showError(err); }
     };
 
-    $("clear-exercise-progress").onclick = () => {
+    mustGet("clear-exercise-progress").onclick = () => {
       try {
         if (!current.id) return;
 
@@ -254,15 +289,13 @@ async function boot() {
           updateDraft(progress, current.id, codeEl.value);
           saveProgress(progress);
           markSavedBaseline();
-        } else {
-          // baseline unchanged
         }
 
         renderProgressFor(current.id);
       } catch (err) { showError(err); }
     };
 
-    $("export-progress").onclick = () => {
+    mustGet("export-progress").onclick = () => {
       try {
         maybeSaveDraft();
         const json = exportProgressJson(progress);
@@ -272,14 +305,14 @@ async function boot() {
       } catch (err) { showError(err); }
     };
 
-    $("import-progress").onclick = () => {
-      $("import-file").value = "";
-      $("import-file").click();
+    mustGet("import-progress").onclick = () => {
+      mustGet("import-file").value = "";
+      mustGet("import-file").click();
     };
 
-    $("import-file").onchange = async () => {
+    mustGet("import-file").onchange = async () => {
       try {
-        const file = $("import-file").files?.[0];
+        const file = mustGet("import-file").files?.[0];
         if (!file) return;
 
         const text = await readFileAsText(file);
@@ -302,11 +335,11 @@ async function boot() {
     };
 
     // Run button
-    const runBtn = $("run");
+    const runBtn = mustGet("run");
     runBtn.onclick = async () => {
-      $("stdout").textContent = "";
-      $("stderr").textContent = "";
-      $("result").textContent = "Running...";
+      mustGet("stdout").textContent = "";
+      mustGet("stderr").textContent = "";
+      mustGet("result").textContent = "Running...";
 
       try {
         maybeSaveDraft();
@@ -320,20 +353,20 @@ async function boot() {
           stdin: exercise.runner?.stdin ?? ""
         });
 
-        $("stdout").textContent = res.stdout || "";
-        $("stderr").textContent = res.stderr || "";
-        $("result").textContent = JSON.stringify(res.status, null, 2);
+        mustGet("stdout").textContent = res.stdout || "";
+        mustGet("stderr").textContent = res.stderr || "";
+        mustGet("result").textContent = JSON.stringify(res.status, null, 2);
 
         renderProgressFor(current.id);
       } catch (err) { showError(err); }
     };
 
     // Grade button
-    const gradeBtn = $("grade");
+    const gradeBtn = mustGet("grade");
     gradeBtn.onclick = async () => {
-      $("stdout").textContent = "";
-      $("stderr").textContent = "";
-      $("result").textContent = "Grading...";
+      mustGet("stdout").textContent = "";
+      mustGet("stderr").textContent = "";
+      mustGet("result").textContent = "Grading...";
 
       try {
         maybeSaveDraft();
@@ -348,9 +381,9 @@ async function boot() {
           saveProgress(progress);
         }
 
-        $("stdout").textContent = stripMarkedBlock(grade.runner?.stdout || "");
-        $("stderr").textContent = grade.runner?.stderr || "";
-        $("result").textContent = JSON.stringify(grade, null, 2);
+        mustGet("stdout").textContent = stripMarkedBlock(grade.runner?.stdout || "");
+        mustGet("stderr").textContent = grade.runner?.stderr || "";
+        mustGet("result").textContent = JSON.stringify(grade, null, 2);
 
         renderProgressFor(current.id);
       } catch (err) { showError(err); }
@@ -380,7 +413,6 @@ async function boot() {
     });
     // ===========================================
 
-    // initial baseline already set by loadByPath()
     setBoot("ready (handlers attached)");
   } catch (err) {
     showError(err);

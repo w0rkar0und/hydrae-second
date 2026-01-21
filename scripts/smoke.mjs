@@ -39,6 +39,7 @@ async function main() {
   const html = await readText(htmlPath);
   const requiredIds = [
     "boot-status",
+    "build-info",
     "exercise-select",
     "exercise-title",
     "exercise-prompt",
@@ -86,7 +87,6 @@ async function main() {
   ok("exercises/index.json valid and referenced exercise.json files exist");
 
   // 3) Each exercise.json is valid + referenced files exist
-  //    (We check all JSON files under exercises/, not just index references)
   const allJson = await listJsonFiles(path.join(ROOT, "exercises"));
 
   for (const jp of allJson) {
@@ -100,7 +100,6 @@ async function main() {
       continue;
     }
 
-    // only validate exercise.json-like shapes (heuristic: has files or grading)
     if (!data || (typeof data !== "object")) continue;
     if (!("files" in data) && !("grading" in data)) continue;
 
@@ -108,7 +107,6 @@ async function main() {
     if (!data.title) fail(`${rel} missing "title"`);
     if (!data.files?.entrypoint) fail(`${rel} missing "files.entrypoint"`);
 
-    // Validate prompt/path references
     const baseDir = path.dirname(jp);
 
     const checkRefPath = async (ref, label) => {
@@ -120,7 +118,6 @@ async function main() {
     await checkRefPath(data.prompt, "prompt.path");
     await checkRefPath(data.grading?.tests, "grading.tests.path");
 
-    // Validate starter/readonly/assets file sources with {path}
     const groups = ["starter", "readonly", "assets"];
     for (const g of groups) {
       const m = data.files?.[g];
@@ -142,9 +139,7 @@ async function main() {
   if (process.exitCode) return;
   ok("exercise.json files validate (structure + referenced files exist)");
 
-  // 4) JS syntax check (basic)
-  // We avoid bundlers; just ensure files can be parsed.
-  // (node --check works on CommonJS; for modules we do a light heuristic by reading)
+  // 4) Basic JS sanity
   const appDir = path.join(ROOT, "app");
   const appFiles = await readdir(appDir);
   for (const f of appFiles) {
