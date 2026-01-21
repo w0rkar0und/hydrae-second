@@ -274,25 +274,31 @@ async function boot() {
       } catch (err) { showError(err); }
     };
 
-    // ===== Keyboard shortcuts =====
-    document.addEventListener("keydown", (e) => {
-      const isMac = navigator.platform.toUpperCase().includes("MAC");
-      const accel = isMac ? e.metaKey : e.ctrlKey;
+    // ===== Keyboard shortcuts (Firefox-safe) =====
+    const codeEl = $("code");
+    const shortcutHandler = (e) => {
+      const accel = e.metaKey || e.ctrlKey;
       if (!accel) return;
 
-      // Only intercept when focused in the editor or body
+      const isEnter = (e.key === "Enter" || e.key === "NumpadEnter" || e.code === "Enter" || e.code === "NumpadEnter");
+      if (!isEnter) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.shiftKey) gradeBtn.click();
+      else runBtn.click();
+    };
+
+    // Bind to textarea (reliable across browsers)
+    codeEl.addEventListener("keydown", shortcutHandler);
+    // Also bind to document so it works if focus drifts
+    document.addEventListener("keydown", (e) => {
       const tag = document.activeElement?.tagName;
       if (tag && tag !== "TEXTAREA" && tag !== "BODY") return;
-
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        runBtn.click();
-      } else if (e.key === "Enter" && e.shiftKey) {
-        e.preventDefault();
-        gradeBtn.click();
-      }
+      shortcutHandler(e);
     });
-    // ==============================
+    // ===========================================
 
     setBoot("ready (handlers attached)");
   } catch (err) {
