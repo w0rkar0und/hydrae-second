@@ -100,6 +100,7 @@ function findExerciseById(indexData, id) {
 
 function formatGradeSummary(grade) {
   if (!grade || typeof grade !== "object") return "";
+
   const passed = !!grade.passed;
   const score = (typeof grade.score === "number") ? grade.score : 0;
   const max = (typeof grade.max_score === "number") ? grade.max_score : 0;
@@ -108,6 +109,14 @@ function formatGradeSummary(grade) {
   lines.push(passed ? "PASSED" : "FAILED");
   lines.push(`Score: ${score} / ${max}`);
 
+  const student = grade.student;
+  if (student && student.ok === false) {
+    lines.push("");
+    lines.push("Student error:");
+    const err = String(student.error || "").trim();
+    lines.push(err || "(no error details)");
+  }
+
   const checks = Array.isArray(grade.checks) ? grade.checks : [];
   if (checks.length) {
     lines.push("");
@@ -115,7 +124,7 @@ function formatGradeSummary(grade) {
     for (const c of checks) {
       const ok = !!c.passed;
       const name = c.name || c.id || "check";
-      const msg = (c.message || "").trim();
+      const msg = String(c.message || "").trim();
       lines.push(`${ok ? "✅" : "❌"} ${name}${msg ? " — " + msg : ""}`);
     }
   }

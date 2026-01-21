@@ -1,160 +1,196 @@
 import { runPython } from "./runner.js";
 import { JSON_START, JSON_END } from "./config.js";
-import { fetchText, normalize, extractMarkedJson } from "./utils.js";
+import { stripMarkedBlock, fetchText } from "./utils.js";
 
-const testsCache = new Map(); // url.href -> code string
+/**
+ * Path 2 grader:
+ * - runs student once and captures stdout/stderr/error
+ * - if student errors, blocks tests and returns a single student_error
+ * - otherwise runs tests and reports per-test failures
+ *
+ * This file assumes:
+ * - entrypoint is /hydrae/main.py
+ * - tests live at the exercise-provided grading.tests.path (fetched over HTTP)
+ */
 
-async function getTestsCode(testsUrl) {
-  const key = String(testsUrl.href || testsUrl);
-  if (testsCache.has(key)) return testsCache.get(key);
-  const code = await fetchText(testsUrl);
-  testsCache.set(key, code);
-  return code;
-}
+const GRADE_WRAPPER_PY = `
+import io, json, runpy, traceback
+from contextlib import redirect_stdout, redirect_stderr
 
-export async function gradeAttempt(exercise, studentCode, exerciseBaseUrl) {
-  const grading = exercise.grading || {};
-  const type = grading.type || "harness_v1";
+JSON_START = ${JSON_START ? "None" : "None"}  # overwritten below
+JSON_END = ${JSON_END ? "None" : "None"}      # overwritten below
 
-  if (type === "harness_v1") {
-    const entrypoint = exercise.files?.entrypoint || "main.py";
-    const harness = grading.harness?.inline ?? "";
-    const needle = grading.pass_condition?.stdout_includes ?? "__PASS__";
+STUDENT_PATH = "/hydrae/main.py"
+TESTS_PATH = "/hydrae/tests/tests.py"
 
-    const gradeEntrypoint = "__grade__.py";
-    const gradeScript = `
-import runpy
-runpy.run_path(${JSON.stringify("/hydrae/" + entrypoint)}, run_name="__main__")
-${harness}
+def run_student_capture():
+    out_buf = io.StringIO()
+    err_buf = io.StringIO()
+    try:
+        with redirect_stdout(out_buf), redirect_stderr(err_buf):
+            runpy.run_path(STUDENT_PATH, run_name="__main__")
+        return True, out_buf.getvalue(), err_buf.getvalue(), None
+    except Exception:
+        return False, out_buf.getvalue(), err_buf.getvalue(), traceback.format_exc()
+
+def discover_tests(ns):
+    tests = []
+    if "TESTS" in ns and isinstance(ns["TESTS"], list):
+        for name in ns["TESTS"]:
+            fn = ns.get(name)
+            if callable(fn):
+                tests.append((name, fn))
+    else:
+        for name, obj in ns.items():
+            if callable(obj) and name.startswith("test_"):
+                tests.append((name, obj))
+        tests.sort(key=lambda x: x[0])
+    return tests
+
+def main():
+    # Load tests module
+    ns = runpy.run_path(TESTS_PATH, run_name="__tests__")
+    tests = discover_tests(ns)
+
+    ok, s_out, s_err, s_exc = run_student_capture()
+
+    checks = []
+    if not ok:
+        for name, _fn in tests:
+            checks.append({
+                "id": name,
+                "name": name,
+                "passed": False,
+                "message": "Blocked: student code raised an error (see student.error)."
+            })
+        payload = {
+            "total": len(tests),
+            "passed": 0,
+            "checks": checks,
+            "student": {
+                "ok": False,
+                "stdout": s_out,
+                "stderr": s_err,
+                "error": s_exc
+            }
+        }
+    else:
+        passed = 0
+        for name, fn in tests:
+            try:
+                fn()
+                checks.append({"id": name, "name": name, "passed": True, "message": ""})
+                passed += 1
+            except Exception:
+                checks.append({
+                    "id": name,
+                    "name": name,
+                    "passed": False,
+                    "message": traceback.format_exc()
+                })
+        payload = {
+            "total": len(tests),
+            "passed": passed,
+            "checks": checks,
+            "student": {
+                "ok": True,
+                "stdout": s_out,
+                "stderr": s_err,
+                "error": None
+            }
+        }
+
+    print("${JSON_START}")
+    print(json.dumps(payload))
+    print("${JSON_END}")
+
+main()
 `;
 
-    const files = {
-      [entrypoint]: studentCode,
-      [gradeEntrypoint]: gradeScript
-    };
+/**
+ * gradeAttempt(exercise, studentCode, baseUrl)
+ * Returns:
+ *   {
+ *     passed, score, max_score,
+ *     checks: [{id,name,passed,message}],
+ *     student?: {ok, stdout, stderr, error},
+ *     runner: {status, stdout, stderr}
+ *   }
+ */
+export async function gradeAttempt(exercise, studentCode, baseUrl) {
+  const grading = exercise.grading || {};
+  const type = grading.type || "tests_v1";
 
-    const runnerRaw = await runPython({
-      files,
-      entrypoint: gradeEntrypoint,
-      stdin: exercise.runner?.stdin ?? ""
-    });
-
-    const runner = normalize(runnerRaw);
-    const passed = runner?.status?.ok === true && String(runner?.stdout || "").includes(needle);
-
+  if (type !== "tests_v1") {
     return {
-      passed,
-      score: passed ? (grading.points ?? 1) : 0,
-      max_score: grading.points ?? 1,
+      passed: false,
+      score: 0,
+      max_score: grading.points ?? 0,
+      checks: [],
+      runner: { status: { ok: false, exception: `Unsupported grading type: ${type}` }, stdout: "", stderr: "" }
+    };
+  }
+
+  // Fetch tests file from the exercise folder
+  const testsRel = grading.tests?.path;
+  if (!testsRel) {
+    return {
+      passed: false,
+      score: 0,
+      max_score: grading.points ?? 0,
+      checks: [],
+      runner: { status: { ok: false, exception: "Missing grading.tests.path" }, stdout: "", stderr: "" }
+    };
+  }
+
+  const testsText = await fetchText(new URL(testsRel, baseUrl));
+  const points = grading.points ?? 10;
+  const passThreshold = grading.pass_threshold ?? points;
+
+  // We always run a wrapper that loads /hydrae/tests/tests.py and runs tests.
+  // Put files into the VFS:
+  const files = {
+    "main.py": studentCode,
+    "tests/tests.py": testsText,
+    "__grade__.py": GRADE_WRAPPER_PY
+  };
+
+  const runner = await runPython({
+    files,
+    entrypoint: "__grade__.py",
+    stdin: ""
+  });
+
+  const raw = runner.stdout || "";
+  const jsonBlock = stripMarkedBlock(raw);
+  let report = null;
+
+  try {
+    report = JSON.parse(jsonBlock);
+  } catch (e) {
+    // If wrapper didn't emit valid JSON, surface the raw output
+    return {
+      passed: false,
+      score: 0,
+      max_score: points,
       checks: [],
       runner
     };
   }
 
-  if (type === "tests_v1") {
-    const entrypoint = exercise.files?.entrypoint || "main.py";
-    const testsRelPath = grading.tests?.path;
-    if (!testsRelPath) {
-      return {
-        passed: false,
-        score: 0,
-        max_score: grading.points ?? 0,
-        checks: [],
-        runner: { status: { ok: false, exception: "tests_v1 requires grading.tests.path" }, stdout: "", stderr: "" }
-      };
-    }
+  const total = report.total ?? 0;
+  const passedCount = report.passed ?? 0;
 
-    const testsUrl = new URL(testsRelPath, exerciseBaseUrl);
-    const testsCode = await getTestsCode(testsUrl);
-
-    const gradeEntrypoint = "__grade__.py";
-    const points = grading.points ?? 1;
-    const passThreshold = grading.pass_threshold ?? points;
-
-    const gradeScript = `
-import json, runpy, traceback
-
-JSON_START = ${JSON.stringify(JSON_START)}
-JSON_END = ${JSON.stringify(JSON_END)}
-
-def run_tests(tests_path):
-  ns = runpy.run_path(tests_path, run_name="__tests__")
-  tests = []
-  for k, v in ns.items():
-    if k.startswith("test_") and callable(v):
-      tests.append((k, v))
-  tests.sort(key=lambda t: t[0])
-
-  checks = []
-  passed_count = 0
-
-  for name, fn in tests:
-    try:
-      fn()
-      checks.append({"id": name, "name": name, "passed": True, "message": ""})
-      passed_count += 1
-    except AssertionError as e:
-      msg = str(e) if str(e) else "Assertion failed"
-      checks.append({"id": name, "name": name, "passed": False, "message": msg})
-    except Exception:
-      checks.append({"id": name, "name": name, "passed": False, "message": traceback.format_exc()})
-
-  return {"total": len(tests), "passed": passed_count, "checks": checks}
-
-report = run_tests(${JSON.stringify("/hydrae/tests/tests.py")})
-
-print(JSON_START)
-print(json.dumps(report))
-print(JSON_END)
-`;
-
-    const files = {
-      [entrypoint]: studentCode,
-      "tests/tests.py": testsCode,
-      [gradeEntrypoint]: gradeScript
-    };
-
-    const runnerRaw = await runPython({
-      files,
-      entrypoint: gradeEntrypoint,
-      stdin: exercise.runner?.stdin ?? ""
-    });
-
-    const runner = normalize(runnerRaw);
-    const report = extractMarkedJson(runner?.stdout || "");
-
-    if (runner?.status?.ok !== true || !report || typeof report.total !== "number") {
-      return {
-        passed: false,
-        score: 0,
-        max_score: points,
-        checks: report?.checks || [],
-        runner
-      };
-    }
-
-    const total = report.total || 0;
-    const passedCount = report.passed || 0;
-
-    const perTest = total > 0 ? points / total : 0;
-    const score = Math.round((passedCount * perTest) * 1000) / 1000;
-
-    const passed = score >= passThreshold;
-
-    return {
-      passed,
-      score,
-      max_score: points,
-      checks: report.checks || [],
-      runner
-    };
-  }
+  const perTest = total > 0 ? (points / total) : 0;
+  const score = Math.round((passedCount * perTest) * 1000) / 1000;
+  const passed = score >= passThreshold;
 
   return {
-    passed: false,
-    score: 0,
-    max_score: grading.points ?? 0,
-    checks: [],
-    runner: { status: { ok: false, exception: `Unsupported grading type: ${type}` }, stdout: "", stderr: "" }
+    passed,
+    score,
+    max_score: points,
+    checks: report.checks || [],
+    student: report.student || undefined,
+    runner
   };
 }
