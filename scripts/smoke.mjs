@@ -32,7 +32,6 @@ async function listJsonFiles(dir) {
 }
 
 async function main() {
-  // 1) Required HTML element IDs
   const htmlPath = path.join(ROOT, "index.html");
   if (!(await exists(htmlPath))) return fail("index.html missing");
 
@@ -46,6 +45,7 @@ async function main() {
     "code",
     "run",
     "grade",
+    "grade-summary",
     "stdout",
     "stderr",
     "result",
@@ -63,7 +63,6 @@ async function main() {
   if (process.exitCode) return;
   ok("index.html contains required element IDs");
 
-  // 2) exercises/index.json exists + valid + referenced exercise paths exist
   const indexPath = path.join(ROOT, "exercises", "index.json");
   if (!(await exists(indexPath))) return fail("exercises/index.json missing");
 
@@ -86,7 +85,6 @@ async function main() {
   if (process.exitCode) return;
   ok("exercises/index.json valid and referenced exercise.json files exist");
 
-  // 3) Each exercise.json is valid + referenced files exist
   const allJson = await listJsonFiles(path.join(ROOT, "exercises"));
 
   for (const jp of allJson) {
@@ -139,19 +137,16 @@ async function main() {
   if (process.exitCode) return;
   ok("exercise.json files validate (structure + referenced files exist)");
 
-  // 4) Basic JS sanity
   const appDir = path.join(ROOT, "app");
   const appFiles = await readdir(appDir);
   for (const f of appFiles) {
-    if (!f.endsWith(".js")) continue;
+    if (!f.endsWith(".js") && !f.endsWith(".css")) continue;
     const p = path.join(appDir, f);
     const txt = await readText(p);
-    if (!txt.includes("export") && !txt.includes("import") && !txt.includes("function") && !txt.includes("const")) {
-      fail(`Suspicious JS file (very short/empty?): app/${f}`);
-    }
+    if (!txt || txt.trim().length < 10) fail(`Suspicious file (very short/empty?): app/${f}`);
   }
   if (process.exitCode) return;
-  ok("basic JS file sanity passed");
+  ok("basic app file sanity passed");
 
   console.log("ALL SMOKE TESTS PASSED");
 }

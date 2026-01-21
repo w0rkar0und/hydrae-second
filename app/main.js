@@ -33,6 +33,7 @@ function assertRequiredElements() {
     "code",
     "run",
     "grade",
+    "grade-summary",
     "stdout",
     "stderr",
     "result",
@@ -72,8 +73,10 @@ function showError(err) {
   setBoot("ERROR (see stderr)");
   const stderr = $("stderr");
   const result = $("result");
+  const summary = $("grade-summary");
   if (stderr) stderr.textContent = txt;
   if (result) result.textContent = JSON.stringify({ error: txt }, null, 2);
+  if (summary) summary.textContent = "";
 }
 
 function buildRunFiles(loaded, editorText) {
@@ -95,6 +98,31 @@ function findExerciseById(indexData, id) {
   return (indexData.exercises || []).find((e) => e.id === id) || null;
 }
 
+function formatGradeSummary(grade) {
+  if (!grade || typeof grade !== "object") return "";
+  const passed = !!grade.passed;
+  const score = (typeof grade.score === "number") ? grade.score : 0;
+  const max = (typeof grade.max_score === "number") ? grade.max_score : 0;
+
+  const lines = [];
+  lines.push(passed ? "PASSED" : "FAILED");
+  lines.push(`Score: ${score} / ${max}`);
+
+  const checks = Array.isArray(grade.checks) ? grade.checks : [];
+  if (checks.length) {
+    lines.push("");
+    lines.push("Checks:");
+    for (const c of checks) {
+      const ok = !!c.passed;
+      const name = c.name || c.id || "check";
+      const msg = (c.message || "").trim();
+      lines.push(`${ok ? "✅" : "❌"} ${name}${msg ? " — " + msg : ""}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 async function boot() {
   try {
     assertRequiredElements();
@@ -113,6 +141,7 @@ async function boot() {
     let progress = loadProgress();
     const saveDraftsCheckbox = mustGet("save-drafts");
     const codeEl = mustGet("code");
+    const gradeSummaryEl = mustGet("grade-summary");
 
     const sel = mustGet("exercise-select");
     sel.innerHTML = "";
@@ -195,6 +224,7 @@ async function boot() {
       mustGet("stdout").textContent = "";
       mustGet("stderr").textContent = "";
       mustGet("result").textContent = "";
+      gradeSummaryEl.textContent = "";
 
       current = { id: exId, path, loaded, entry, starterCode };
       window.location.hash = exId;
@@ -246,7 +276,6 @@ async function boot() {
         if (!saveDraftsCheckbox.checked) {
           clearDraft(progress, current.id);
           saveProgress(progress);
-          // baseline unchanged; user may be dirty now
         } else {
           updateDraft(progress, current.id, codeEl.value);
           saveProgress(progress);
@@ -340,6 +369,7 @@ async function boot() {
       mustGet("stdout").textContent = "";
       mustGet("stderr").textContent = "";
       mustGet("result").textContent = "Running...";
+      gradeSummaryEl.textContent = "";
 
       try {
         maybeSaveDraft();
@@ -367,6 +397,7 @@ async function boot() {
       mustGet("stdout").textContent = "";
       mustGet("stderr").textContent = "";
       mustGet("result").textContent = "Grading...";
+      gradeSummaryEl.textContent = "Grading...";
 
       try {
         maybeSaveDraft();
@@ -384,6 +415,7 @@ async function boot() {
         mustGet("stdout").textContent = stripMarkedBlock(grade.runner?.stdout || "");
         mustGet("stderr").textContent = grade.runner?.stderr || "";
         mustGet("result").textContent = JSON.stringify(grade, null, 2);
+        gradeSummaryEl.textContent = formatGradeSummary(grade);
 
         renderProgressFor(current.id);
       } catch (err) { showError(err); }

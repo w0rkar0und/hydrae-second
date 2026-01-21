@@ -4,56 +4,85 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Hydrae Tutor (MVP)</title>
+    <link rel="stylesheet" href="./app/style.css" />
   </head>
   <body>
-    <h1>Hydrae Tutor (MVP)</h1>
-
-    <section>
-      <h2>Status</h2>
-      <pre id="boot-status">Boot status: (waiting for JS)</pre>
-      <pre id="build-info">Build: (unknown)</pre>
-    </section>
-
-    <section>
-      <h2>Progress</h2>
-      <button id="export-progress">Export progress (JSON)</button>
-      <button id="import-progress">Import progress (JSON)</button>
-      <label style="margin-left: 12px;">
-        <input type="checkbox" id="save-drafts" checked />
-        Save drafts locally
-      </label>
-      <button id="reset-draft" style="margin-left: 12px;">Reset draft to starter</button>
-      <button id="clear-exercise-progress" style="margin-left: 6px;">Clear exercise progress</button>
-
-      <input id="import-file" type="file" accept="application/json" style="display:none;" />
-      <pre id="progress-status"></pre>
-    </section>
-
-    <section>
-      <h2>Exercise</h2>
-      <label>
-        Select:
-        <select id="exercise-select"></select>
-      </label>
-      <div id="exercise-title"></div>
-      <pre id="exercise-prompt"></pre>
-    </section>
-
-    <section>
-      <h2>Code</h2>
-      <textarea id="code" rows="14" cols="90" spellcheck="false"></textarea>
-      <div>
-        <button id="run">Run</button>
-        <button id="grade">Grade</button>
+    <header class="top">
+      <div class="top-left">
+        <h1>Hydrae Tutor (MVP)</h1>
+        <div class="top-meta">
+          <div id="boot-status">Boot status: (waiting for JS)</div>
+          <div id="build-info">Build: (unknown)</div>
+        </div>
       </div>
-    </section>
+    </header>
 
-    <section>
-      <h2>Output</h2>
-      <pre id="stdout"></pre>
-      <pre id="stderr"></pre>
-      <pre id="result"></pre>
-    </section>
+    <main class="grid">
+      <section class="card">
+        <h2>Progress</h2>
+        <div class="row">
+          <button id="export-progress">Export progress (JSON)</button>
+          <button id="import-progress">Import progress (JSON)</button>
+
+          <label class="checkbox">
+            <input type="checkbox" id="save-drafts" checked />
+            Save drafts locally
+          </label>
+
+          <button id="reset-draft">Reset draft to starter</button>
+          <button id="clear-exercise-progress">Clear exercise progress</button>
+
+          <input id="import-file" type="file" accept="application/json" style="display:none;" />
+        </div>
+        <pre id="progress-status" class="mono"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Exercise</h2>
+        <div class="row">
+          <label>
+            Select:
+            <select id="exercise-select"></select>
+          </label>
+        </div>
+        <div id="exercise-title" class="title"></div>
+        <pre id="exercise-prompt" class="mono"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Code</h2>
+        <textarea id="code" rows="14" cols="90" spellcheck="false" class="mono editor"></textarea>
+        <div class="row">
+          <button id="run">Run</button>
+          <button id="grade">Grade</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Output</h2>
+
+        <div class="summary">
+          <div class="summary-title">Grade summary</div>
+          <pre id="grade-summary" class="mono"></pre>
+        </div>
+
+        <div class="split">
+          <div class="pane">
+            <div class="pane-title">stdout</div>
+            <pre id="stdout" class="mono"></pre>
+          </div>
+          <div class="pane">
+            <div class="pane-title">stderr</div>
+            <pre id="stderr" class="mono"></pre>
+          </div>
+        </div>
+
+        <div class="pane">
+          <div class="pane-title">raw result (JSON)</div>
+          <pre id="result" class="mono"></pre>
+        </div>
+      </section>
+    </main>
 
     <script type="module" src="./app/main.js"></script>
   </body>
