@@ -35,13 +35,11 @@ function showError(err) {
 
 function buildRunFiles(loaded, editorText) {
   const entry = loaded.files.entrypoint;
-
   const files = {
     ...(loaded.files.starter || {}),
     ...(loaded.files.readonly || {}),
     ...(loaded.files.assets || {})
   };
-
   files[entry] = editorText;
   return files;
 }
@@ -68,7 +66,6 @@ async function boot() {
 
     const sel = $("exercise-select");
     sel.innerHTML = "";
-
     for (const ex of indexData.exercises || []) {
       const opt = document.createElement("option");
       opt.value = ex.path;
@@ -100,14 +97,15 @@ async function boot() {
       parts.push(`Exercise: ${exId}`);
       parts.push(`Best: ${best.score}/${best.max_score} (${best.passed ? "PASSED" : "NOT PASSED"})`);
       if (best.achieved_utc) parts.push(`Best achieved: ${best.achieved_utc}`);
-      if (last?.attempted_utc) parts.push(`Last attempt: ${last.attempted_utc} — ${last.score}/${last.max_score} (${last.passed ? "PASSED" : "FAILED"})`);
-      if (saveDraftsCheckbox?.checked && exP.draft?.saved_utc) parts.push(`Draft saved: ${exP.draft.saved_utc}`);
+      if (last?.attempted_utc)
+        parts.push(`Last attempt: ${last.attempted_utc} — ${last.score}/${last.max_score} (${last.passed ? "PASSED" : "FAILED"})`);
+      if (saveDraftsCheckbox?.checked && exP.draft?.saved_utc)
+        parts.push(`Draft saved: ${exP.draft.saved_utc}`);
       setProgressStatus(parts.join("\n"));
     }
 
     async function loadByPath(path) {
       maybeSaveDraft();
-
       setBoot(`loading exercise: ${path} ...`);
 
       const loaded = await loadExercise(path);
@@ -129,7 +127,6 @@ async function boot() {
       $("result").textContent = "";
 
       current = { id: exId, path, loaded, entry, starterCode };
-
       window.location.hash = exId;
       sel.value = path;
 
@@ -145,37 +142,24 @@ async function boot() {
     await loadByPath(initialPath);
 
     sel.onchange = async () => {
-      try {
-        await loadByPath(sel.value);
-      } catch (err) {
-        showError(err);
-      }
+      try { await loadByPath(sel.value); } catch (err) { showError(err); }
     };
 
     window.addEventListener("hashchange", async () => {
       const id = getHashId();
-      if (!id) return;
-      if (current.id === id) return;
-
+      if (!id || current.id === id) return;
       const ex = findExerciseById(indexData, id);
       if (!ex?.path) return;
-
-      try {
-        await loadByPath(ex.path);
-      } catch (err) {
-        showError(err);
-      }
+      try { await loadByPath(ex.path); } catch (err) { showError(err); }
     });
 
+    // Autosave drafts
     let draftTimer = null;
     $("code").addEventListener("input", () => {
       if (!saveDraftsCheckbox?.checked) return;
       if (draftTimer) clearTimeout(draftTimer);
       draftTimer = setTimeout(() => {
-        try {
-          maybeSaveDraft();
-          renderProgressFor(current.id);
-        } catch (_) {}
+        try { maybeSaveDraft(); renderProgressFor(current.id); } catch (_) {}
       }, 700);
     });
 
@@ -191,9 +175,7 @@ async function boot() {
           saveProgress(progress);
         }
         renderProgressFor(current.id);
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     });
 
     $("reset-draft").onclick = () => {
@@ -201,14 +183,10 @@ async function boot() {
         if (!current.id) return;
         $("code").value = current.starterCode;
         clearDraft(progress, current.id);
-        if (saveDraftsCheckbox.checked) {
-          updateDraft(progress, current.id, $("code").value);
-        }
+        if (saveDraftsCheckbox.checked) updateDraft(progress, current.id, $("code").value);
         saveProgress(progress);
         renderProgressFor(current.id);
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     };
 
     $("clear-exercise-progress").onclick = () => {
@@ -218,9 +196,7 @@ async function boot() {
         saveProgress(progress);
         $("code").value = current.starterCode;
         renderProgressFor(current.id);
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     };
 
     $("export-progress").onclick = () => {
@@ -230,9 +206,7 @@ async function boot() {
         const name = `hydrae_progress_${new Date().toISOString().slice(0, 10)}.json`;
         downloadText(name, json, "application/json");
         setProgressStatus("Exported progress JSON.");
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     };
 
     $("import-progress").onclick = () => {
@@ -244,77 +218,81 @@ async function boot() {
       try {
         const file = $("import-file").files?.[0];
         if (!file) return;
-
         const text = await readFileAsText(file);
         const incoming = JSON.parse(text);
-
         progress = mergeProgress(progress, incoming);
         saveProgress(progress);
-
         if (saveDraftsCheckbox.checked && current.id) {
           const exP = getExerciseProgress(progress, current.id);
           if (typeof exP.draft?.code === "string") $("code").value = exP.draft.code;
         }
-
         renderProgressFor(current.id);
         setProgressStatus("Imported and merged progress JSON.");
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     };
 
-    $("run").onclick = async () => {
+    // Run
+    const runBtn = $("run");
+    runBtn.onclick = async () => {
       $("stdout").textContent = "";
       $("stderr").textContent = "";
       $("result").textContent = "Running...";
-
       try {
         maybeSaveDraft();
-
         const loaded = current.loaded;
         const exercise = loaded.exercise;
-
         const res = await runPython({
           files: buildRunFiles(loaded, $("code").value),
           entrypoint: current.entry,
           stdin: exercise.runner?.stdin ?? ""
         });
-
         $("stdout").textContent = res.stdout || "";
         $("stderr").textContent = res.stderr || "";
         $("result").textContent = JSON.stringify(res.status, null, 2);
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     };
 
-    $("grade").onclick = async () => {
+    // Grade
+    const gradeBtn = $("grade");
+    gradeBtn.onclick = async () => {
       $("stdout").textContent = "";
       $("stderr").textContent = "";
       $("result").textContent = "Grading...";
-
       try {
         maybeSaveDraft();
-
         const loaded = current.loaded;
         const exercise = loaded.exercise;
-
         const grade = await gradeAttempt(exercise, $("code").value, loaded.baseUrl);
-
         if (current.id) {
           recordAttempt(progress, current.id, grade);
           saveProgress(progress);
         }
-
         $("stdout").textContent = stripMarkedBlock(grade.runner?.stdout || "");
         $("stderr").textContent = grade.runner?.stderr || "";
         $("result").textContent = JSON.stringify(grade, null, 2);
-
         renderProgressFor(current.id);
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     };
+
+    // ===== Keyboard shortcuts =====
+    document.addEventListener("keydown", (e) => {
+      const isMac = navigator.platform.toUpperCase().includes("MAC");
+      const accel = isMac ? e.metaKey : e.ctrlKey;
+      if (!accel) return;
+
+      // Only intercept when focused in the editor or body
+      const tag = document.activeElement?.tagName;
+      if (tag && tag !== "TEXTAREA" && tag !== "BODY") return;
+
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        runBtn.click();
+      } else if (e.key === "Enter" && e.shiftKey) {
+        e.preventDefault();
+        gradeBtn.click();
+      }
+    });
+    // ==============================
 
     setBoot("ready (handlers attached)");
   } catch (err) {
