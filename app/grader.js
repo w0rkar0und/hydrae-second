@@ -5,20 +5,15 @@ import { stripMarkedBlock, fetchText } from "./utils.js";
 /**
  * Path 2 grader:
  * - runs student once and captures stdout/stderr/error
- * - if student errors, blocks tests and returns a single student_error
+ * - if student errors, blocks tests and returns a single student error
  * - otherwise runs tests and reports per-test failures
  *
- * This file assumes:
- * - entrypoint is /hydrae/main.py
- * - tests live at the exercise-provided grading.tests.path (fetched over HTTP)
+ * Assumes runner writes files under /hydrae (as your runner currently does).
  */
 
 const GRADE_WRAPPER_PY = `
 import io, json, runpy, traceback
 from contextlib import redirect_stdout, redirect_stderr
-
-JSON_START = ${JSON_START ? "None" : "None"}  # overwritten below
-JSON_END = ${JSON_END ? "None" : "None"}      # overwritten below
 
 STUDENT_PATH = "/hydrae/main.py"
 TESTS_PATH = "/hydrae/tests/tests.py"
@@ -48,7 +43,6 @@ def discover_tests(ns):
     return tests
 
 def main():
-    # Load tests module
     ns = runpy.run_path(TESTS_PATH, run_name="__tests__")
     tests = discover_tests(ns)
 
@@ -67,12 +61,7 @@ def main():
             "total": len(tests),
             "passed": 0,
             "checks": checks,
-            "student": {
-                "ok": False,
-                "stdout": s_out,
-                "stderr": s_err,
-                "error": s_exc
-            }
+            "student": {"ok": False, "stdout": s_out, "stderr": s_err, "error": s_exc}
         }
     else:
         passed = 0
@@ -82,22 +71,13 @@ def main():
                 checks.append({"id": name, "name": name, "passed": True, "message": ""})
                 passed += 1
             except Exception:
-                checks.append({
-                    "id": name,
-                    "name": name,
-                    "passed": False,
-                    "message": traceback.format_exc()
-                })
+                checks.append({"id": name, "name": name, "passed": False, "message": traceback.format_exc()})
+
         payload = {
             "total": len(tests),
             "passed": passed,
             "checks": checks,
-            "student": {
-                "ok": True,
-                "stdout": s_out,
-                "stderr": s_err,
-                "error": None
-            }
+            "student": {"ok": True, "stdout": s_out, "stderr": s_err, "error": None}
         }
 
     print("${JSON_START}")
@@ -107,16 +87,6 @@ def main():
 main()
 `;
 
-/**
- * gradeAttempt(exercise, studentCode, baseUrl)
- * Returns:
- *   {
- *     passed, score, max_score,
- *     checks: [{id,name,passed,message}],
- *     student?: {ok, stdout, stderr, error},
- *     runner: {status, stdout, stderr}
- *   }
- */
 export async function gradeAttempt(exercise, studentCode, baseUrl) {
   const grading = exercise.grading || {};
   const type = grading.type || "tests_v1";
@@ -131,7 +101,6 @@ export async function gradeAttempt(exercise, studentCode, baseUrl) {
     };
   }
 
-  // Fetch tests file from the exercise folder
   const testsRel = grading.tests?.path;
   if (!testsRel) {
     return {
@@ -147,8 +116,6 @@ export async function gradeAttempt(exercise, studentCode, baseUrl) {
   const points = grading.points ?? 10;
   const passThreshold = grading.pass_threshold ?? points;
 
-  // We always run a wrapper that loads /hydrae/tests/tests.py and runs tests.
-  // Put files into the VFS:
   const files = {
     "main.py": studentCode,
     "tests/tests.py": testsText,
@@ -163,12 +130,11 @@ export async function gradeAttempt(exercise, studentCode, baseUrl) {
 
   const raw = runner.stdout || "";
   const jsonBlock = stripMarkedBlock(raw);
-  let report = null;
+  let report;
 
   try {
     report = JSON.parse(jsonBlock);
-  } catch (e) {
-    // If wrapper didn't emit valid JSON, surface the raw output
+  } catch {
     return {
       passed: false,
       score: 0,
