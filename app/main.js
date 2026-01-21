@@ -422,7 +422,9 @@ async function boot() {
         }
 
         mustGet("stdout").textContent = stripMarkedBlock(grade.runner?.stdout || "");
-        mustGet("stderr").textContent = grade.runner?.stderr || "";
+        const studentStderr = grade.student?.stderr || "";
+        const runnerStderr = grade.runner?.stderr || "";
+        mustGet("stderr").textContent = studentStderr || runnerStderr || "";
         mustGet("result").textContent = JSON.stringify(grade, null, 2);
         gradeSummaryEl.textContent = formatGradeSummary(grade);
 
