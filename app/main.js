@@ -81,43 +81,31 @@ async function boot() {
       starterCode: ""
     };
 
-    // ===== Unsaved changes tracking =====
-    let lastSavedBaseline = ""; // what we consider "saved" right now
+    // ===== Unsaved changes guard (explicit dirty flag) =====
     let dirty = false;
 
-    function computeBaselineForCurrent() {
-      if (!current.id) return current.starterCode || "";
-      const exP = getExerciseProgress(progress, current.id);
-      if (saveDraftsCheckbox?.checked && typeof exP.draft?.code === "string") return exP.draft.code;
-      return current.starterCode || "";
-    }
+    window.addEventListener("beforeunload", (e) => {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = "You have unsaved changes.";
+      return "You have unsaved changes.";
+    });
 
-    function refreshDirtyState() {
-      const baseline = computeBaselineForCurrent();
-      const now = String($("code").value || "");
-      dirty = (now !== baseline);
-    }
-
-    function setBaselineToCurrentEditor() {
-      lastSavedBaseline = String($("code").value || "");
+    function markClean() {
       dirty = false;
     }
 
-    window.addEventListener("beforeunload", (e) => {
-      refreshDirtyState();
-      if (!dirty) return;
-      e.preventDefault();
-      e.returnValue = "";
-    });
-    // ===================================
+    function markDirty() {
+      dirty = true;
+    }
+    // ======================================================
 
     function maybeSaveDraft() {
       if (!saveDraftsCheckbox?.checked) return;
       if (!current.id) return;
       updateDraft(progress, current.id, $("code").value);
       saveProgress(progress);
-      // after saving, baseline becomes current editor (not dirty)
-      setBaselineToCurrentEditor();
+      markClean();
     }
 
     function renderProgressFor(exId) {
@@ -137,7 +125,7 @@ async function boot() {
     }
 
     async function loadByPath(path) {
-      // Save outgoing draft if enabled (also clears dirty)
+      // save outgoing draft (if enabled) to avoid false warnings on exercise switch
       maybeSaveDraft();
 
       setBoot(`loading exercise: ${path} ...`);
@@ -164,10 +152,7 @@ async function boot() {
       window.location.hash = exId;
       sel.value = path;
 
-      // set baseline to whatever we just loaded into editor
-      setBaselineToCurrentEditor();
-      lastSavedBaseline = String($("code").value || "");
-      dirty = false;
+      markClean();
 
       setBoot("ready (handlers attached)");
       renderProgressFor(exId);
@@ -195,7 +180,7 @@ async function boot() {
     // Autosave drafts (debounced)
     let draftTimer = null;
     $("code").addEventListener("input", () => {
-      refreshDirtyState();
+      markDirty();
 
       if (!saveDraftsCheckbox?.checked) return;
       if (draftTimer) clearTimeout(draftTimer);
@@ -212,16 +197,16 @@ async function boot() {
         if (!current.id) return;
 
         if (!saveDraftsCheckbox.checked) {
-          // turning OFF drafts: clear stored draft and baseline becomes starter
+          // turning OFF drafts: clear stored draft; edits become unsaved until user exports/imports etc.
           clearDraft(progress, current.id);
           saveProgress(progress);
-          $("code").value = current.starterCode;
-          setBaselineToCurrentEditor();
+          // Keep current editor content as-is; user might be mid-edit
+          // We do NOT mark clean here.
         } else {
-          // turning ON drafts: immediately save current editor as draft
+          // turning ON: immediately save current editor as draft (marks clean)
           updateDraft(progress, current.id, $("code").value);
           saveProgress(progress);
-          setBaselineToCurrentEditor();
+          markClean();
         }
 
         renderProgressFor(current.id);
@@ -235,10 +220,15 @@ async function boot() {
         $("code").value = current.starterCode;
         clearDraft(progress, current.id);
 
-        if (saveDraftsCheckbox.checked) updateDraft(progress, current.id, $("code").value);
+        if (saveDraftsCheckbox.checked) {
+          updateDraft(progress, current.id, $("code").value);
+          saveProgress(progress);
+          markClean();
+        } else {
+          saveProgress(progress);
+          markDirty(); // drafts off => this is an unsaved local change
+        }
 
-        saveProgress(progress);
-        setBaselineToCurrentEditor();
         renderProgressFor(current.id);
       } catch (err) { showError(err); }
     };
@@ -251,7 +241,15 @@ async function boot() {
         saveProgress(progress);
 
         $("code").value = current.starterCode;
-        setBaselineToCurrentEditor();
+
+        if (saveDraftsCheckbox.checked) {
+          updateDraft(progress, current.id, $("code").value);
+          saveProgress(progress);
+          markClean();
+        } else {
+          markDirty();
+        }
+
         renderProgressFor(current.id);
       } catch (err) { showError(err); }
     };
@@ -263,6 +261,7 @@ async function boot() {
         const name = `hydrae_progress_${new Date().toISOString().slice(0, 10)}.json`;
         downloadText(name, json, "application/json");
         setProgressStatus("Exported progress JSON.");
+        // exporting doesn't necessarily mean local editor content is saved unless drafts are on
       } catch (err) { showError(err); }
     };
 
@@ -284,10 +283,12 @@ async function boot() {
 
         if (saveDraftsCheckbox.checked && current.id) {
           const exP = getExerciseProgress(progress, current.id);
-          if (typeof exP.draft?.code === "string") $("code").value = exP.draft.code;
+          if (typeof exP.draft?.code === "string") {
+            $("code").value = exP.draft.code;
+            markClean();
+          }
         }
 
-        setBaselineToCurrentEditor();
         renderProgressFor(current.id);
         setProgressStatus("Imported and merged progress JSON.");
       } catch (err) { showError(err); }
@@ -315,9 +316,6 @@ async function boot() {
         $("stdout").textContent = res.stdout || "";
         $("stderr").textContent = res.stderr || "";
         $("result").textContent = JSON.stringify(res.status, null, 2);
-
-        // running doesn't change baseline; keep dirty state accurate
-        refreshDirtyState();
       } catch (err) { showError(err); }
     };
 
@@ -346,7 +344,6 @@ async function boot() {
         $("result").textContent = JSON.stringify(grade, null, 2);
 
         renderProgressFor(current.id);
-        refreshDirtyState();
       } catch (err) { showError(err); }
     };
 
@@ -375,10 +372,7 @@ async function boot() {
     });
     // ===========================================
 
-    // initialize baseline/dirty once
-    lastSavedBaseline = String($("code").value || "");
-    dirty = false;
-
+    markClean();
     setBoot("ready (handlers attached)");
   } catch (err) {
     showError(err);
